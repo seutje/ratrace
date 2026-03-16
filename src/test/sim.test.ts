@@ -117,6 +117,17 @@ describe('pathfinding', () => {
     ]);
   });
 
+  it('prefers the starter road corridor over a shorter off-road shortcut when roads are cheaper', () => {
+    const world = createStarterWorld(7);
+    const path = findPath(world, { x: 3, y: 9 }, { x: 14, y: 9 });
+
+    expect(path).not.toBeNull();
+    expect(path).toContainEqual({ x: 3, y: 8 });
+    expect(path).toContainEqual({ x: 3, y: 6 });
+    expect(path).toContainEqual({ x: 14, y: 6 });
+    expect(path).toContainEqual({ x: 14, y: 8 });
+  });
+
   it('returns null when the goal is blocked off', () => {
     const world = createBlankWorld(3, 3);
     setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Blocked });

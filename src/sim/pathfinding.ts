@@ -8,7 +8,8 @@ const directions: Point[] = [
   { x: 0, y: -1 },
 ];
 
-const heuristic = (start: Point, goal: Point) => Math.abs(start.x - goal.x) + Math.abs(start.y - goal.y);
+// Scale Manhattan distance by the cheapest possible tile cost so A* stays admissible.
+const heuristic = (start: Point, goal: Point) => 0.5 * (Math.abs(start.x - goal.x) + Math.abs(start.y - goal.y));
 
 const movementCost = (world: WorldState, point: Point) => {
   const tile = getTile(world, point);
