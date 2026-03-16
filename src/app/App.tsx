@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { renderWorld, calculateViewport } from '../render/canvasRenderer';
+import { renderWorld, calculateViewport, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM } from '../render/canvasRenderer';
 import { useSimulationLoop } from '../render/useSimulationLoop';
 import { BuildMenu } from '../ui/BuildMenu';
 import { Controls } from '../ui/Controls';
@@ -12,10 +12,14 @@ type CanvasSize = {
   height: number;
 };
 
+const zoomIn = (zoom: number) => Math.min(MAX_ZOOM, zoom * 2);
+const zoomOut = (zoom: number) => Math.max(MIN_ZOOM, zoom / 2);
+
 export const App = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState<CanvasSize>({ width: 960, height: 640 });
+  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
 
   const world = useWorldStore((state) => state.world);
   const paused = useWorldStore((state) => state.paused);
@@ -54,8 +58,8 @@ export const App = () => {
   const worldWidth = world.width;
   const worldHeight = world.height;
   const viewport = useMemo(
-    () => calculateViewport({ width: worldWidth, height: worldHeight }, size.width, size.height),
-    [size.height, size.width, worldHeight, worldWidth],
+    () => calculateViewport({ width: worldWidth, height: worldHeight }, size.width, size.height, zoom),
+    [size.height, size.width, worldHeight, worldWidth, zoom],
   );
 
   useEffect(() => {
@@ -121,9 +125,15 @@ export const App = () => {
         <aside className="sidebar">
           <Controls
             paused={paused}
+            zoom={zoom}
+            canZoomIn={zoom < MAX_ZOOM}
+            canZoomOut={zoom > MIN_ZOOM}
             onPauseToggle={() => setPaused(!paused)}
             onSingleStep={singleStep}
             onReset={reset}
+            onZoomIn={() => setZoom((currentZoom) => zoomIn(currentZoom))}
+            onZoomOut={() => setZoom((currentZoom) => zoomOut(currentZoom))}
+            onZoomReset={() => setZoom(DEFAULT_ZOOM)}
           />
           <BuildMenu mode={buildMode} onChange={setBuildMode} />
           <Inspector world={world} />

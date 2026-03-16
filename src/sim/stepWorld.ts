@@ -5,6 +5,8 @@ import {
   INDUSTRIAL_OUTPUT_PER_HOUR,
   MAX_STAT,
   ROAD_SPEED_MULTIPLIER,
+  SHOPPING_COOLDOWN_TICKS,
+  SHOPPING_HUNGER_RECOVERY,
   SHOPPING_HUNGER_THRESHOLD,
   SHOP_PRICE,
   SLEEP_END_MINUTE,
@@ -159,7 +161,7 @@ const arriveAtBuilding = (agent: Agent, building: Building, world: WorldState) =
         agent.wallet -= SHOP_PRICE;
         building.stock -= 1;
         world.economy.treasury += 2;
-        agent.stats.hunger = clamp(agent.stats.hunger - 45, 0, MAX_STAT);
+        agent.stats.hunger = clamp(agent.stats.hunger - SHOPPING_HUNGER_RECOVERY, 0, MAX_STAT);
         agent.stats.happiness = clamp(agent.stats.happiness + 8, 0, MAX_STAT);
         agent.lastShoppedTick = world.tick;
         agent.thought = 'Groceries secured.';
@@ -198,10 +200,21 @@ const nearestBuilding = (world: WorldState, from: Point, kind: BuildingKind, pre
     )[0];
 };
 
+const isOnBuildingTile = (agent: Agent, building?: Building) => {
+  if (!building) {
+    return false;
+  }
+
+  const tile = pointToTile(agent.pos);
+  return tile.x === building.tile.x && tile.y === building.tile.y;
+};
+
 const determineDestination = (world: WorldState, agent: Agent): AgentDestination | undefined => {
   const home = getBuilding(world, agent.homeId);
   const work = getBuilding(world, agent.workId);
   const tile = pointToTile(agent.pos);
+  const shoppingCooldownElapsed =
+    agent.lastShoppedTick === undefined || world.tick - agent.lastShoppedTick >= SHOPPING_COOLDOWN_TICKS;
 
   if (agent.stats.energy <= SLEEP_ENERGY_THRESHOLD && home) {
     return { buildingId: home.id, kind: 'home' };
@@ -211,7 +224,7 @@ const determineDestination = (world: WorldState, agent: Agent): AgentDestination
     return { buildingId: work.id, kind: 'work' };
   }
 
-  if (agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && agent.wallet >= SHOP_PRICE) {
+  if (agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && agent.wallet >= SHOP_PRICE && shoppingCooldownElapsed) {
     const shop = nearestBuilding(world, tile, BuildingKind.Commercial, (building) => building.stock > 0);
     if (shop) {
       return { buildingId: shop.id, kind: 'shop' };
@@ -222,7 +235,7 @@ const determineDestination = (world: WorldState, agent: Agent): AgentDestination
     return { buildingId: home.id, kind: 'home' };
   }
 
-  if (home) {
+  if (home && !isOnBuildingTile(agent, home)) {
     return { buildingId: home.id, kind: 'home' };
   }
 

@@ -8,6 +8,10 @@ export type Viewport = {
   height: number;
 };
 
+export const DEFAULT_ZOOM = 0.25;
+export const MIN_ZOOM = 0.125;
+export const MAX_ZOOM = 4;
+
 const tilePalette: Record<TileType, string> = {
   [TileType.Empty]: '#efe4cb',
   [TileType.Road]: '#53524f',
@@ -28,8 +32,14 @@ const agentPalette: Record<AgentState, string> = {
   [AgentState.Wandering]: '#694d2c',
 };
 
-export const calculateViewport = (world: Pick<WorldState, 'width' | 'height'>, width: number, height: number): Viewport => {
-  const tileSize = Math.floor(Math.min(width / world.width, height / world.height));
+export const calculateViewport = (
+  world: Pick<WorldState, 'width' | 'height'>,
+  width: number,
+  height: number,
+  zoom = 1,
+): Viewport => {
+  const fittedTileSize = Math.max(1, Math.floor(Math.min(width / world.width, height / world.height)));
+  const tileSize = Math.max(1, Math.floor(fittedTileSize * zoom));
   const usedWidth = tileSize * world.width;
   const usedHeight = tileSize * world.height;
 

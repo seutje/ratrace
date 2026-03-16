@@ -17,7 +17,9 @@ export const STARTER_WORLD_WIDTH = 20;
 export const STARTER_WORLD_HEIGHT = 14;
 
 export const MAX_STAT = 100;
-export const SHOPPING_HUNGER_THRESHOLD = 55;
+export const SHOPPING_HUNGER_THRESHOLD = 75;
+export const SHOPPING_HUNGER_RECOVERY = 60;
+export const SHOPPING_COOLDOWN_TICKS = 360;
 export const SLEEP_ENERGY_THRESHOLD = 20;
 export const SHOP_PRICE = 8;
 export const HOURLY_WAGE = 12;

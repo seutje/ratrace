@@ -1,6 +1,6 @@
 import { createBlankWorld, createStarterWorld } from '../sim/world';
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
-import { ticksPerSecond } from '../sim/constants';
+import { SHOPPING_COOLDOWN_TICKS, SHOPPING_HUNGER_THRESHOLD, ticksPerSecond } from '../sim/constants';
 import { BuildingKind, AgentState, TileType, WorldState } from '../sim/types';
 import { findPath } from '../sim/pathfinding';
 import { getCongestionSpeedFactor } from '../sim/traffic';
@@ -174,6 +174,67 @@ describe('economy', () => {
 
     expect(world.entities.buildings.find((building) => building.id === shop.id)!.stock).toBe(shop.stock);
     expect(world.entities.agents[0]!.thought).toContain('broke');
+  });
+
+  it('does not immediately pick another shopping trip after a purchase', () => {
+    let world = createStarterWorld(7);
+    const agent = world.entities.agents[0]!;
+    const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
+    const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
+
+    agent.wallet = 100;
+    agent.stats.hunger = 100;
+    agent.pos = tileCenter(shop.tile);
+    world.minutesOfDay = 18 * 60;
+
+    world = stepWorld(world);
+    expect(world.entities.agents[0]!.lastShoppedTick).toBe(world.tick);
+    expect(world.entities.agents[0]!.stats.hunger).toBeLessThan(SHOPPING_HUNGER_THRESHOLD);
+
+    world.entities.agents[0]!.pos = tileCenter(home.tile);
+    world = stepWorld(world);
+
+    expect(world.entities.agents[0]!.destination).toBeUndefined();
+    expect(world.entities.agents[0]!.state).toBe(AgentState.Idle);
+
+    world = stepTimes(world, SHOPPING_COOLDOWN_TICKS - 2);
+    expect(world.entities.agents[0]!.destination?.kind).not.toBe('shop');
+  });
+
+  it('does not shop twice during the same evening after one successful purchase', () => {
+    let world = createStarterWorld(7);
+    const agent = world.entities.agents[0]!;
+
+    agent.wallet = 100;
+    agent.stats.hunger = 100;
+    agent.stats.energy = 80;
+    world.minutesOfDay = 18 * 60;
+
+    let shoppingTicks = 0;
+    for (let index = 0; index < 300; index += 1) {
+      world = stepWorld(world);
+      if (world.entities.agents[0]!.state === AgentState.Shopping) {
+        shoppingTicks += 1;
+      }
+    }
+
+    expect(shoppingTicks).toBe(1);
+  });
+
+  it('does not force a home destination when already home and no need is active', () => {
+    let world = createStarterWorld(7);
+    const agent = world.entities.agents[0]!;
+    const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
+
+    agent.pos = tileCenter(home.tile);
+    agent.stats.hunger = 20;
+    agent.stats.energy = 80;
+    world.minutesOfDay = 18 * 60;
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents[0]!.destination).toBeUndefined();
+    expect(world.entities.agents[0]!.state).toBe(AgentState.Idle);
   });
 });
 

@@ -167,6 +167,11 @@ canvas {
   font-size: 1.15rem;
 }
 
+.controls {
+  display: grid;
+  gap: 14px;
+}
+
 .button-row,
 .build-grid {
   display: grid;
@@ -179,6 +184,28 @@ canvas {
 
 .build-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.control-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.control-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.control-meta strong {
+  font-family: ui-monospace, 'SFMono-Regular', monospace;
+  font-size: 1rem;
+  color: #281a11;
+}
+
+.zoom-row {
+  grid-template-columns: 56px minmax(0, 1fr) 56px;
 }
 
 button {
@@ -196,6 +223,13 @@ button {
 button:hover {
   transform: translateY(-1px);
   filter: brightness(1.02);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  transform: none;
+  filter: saturate(0.7);
+  opacity: 0.55;
 }
 
 button.selected {
