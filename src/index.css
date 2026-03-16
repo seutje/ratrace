@@ -110,6 +110,11 @@ button {
   padding: 18px;
 }
 
+.canvas-stage {
+  flex: 1;
+  min-height: 0;
+}
+
 .canvas-header {
   display: flex;
   justify-content: space-between;
@@ -139,9 +144,9 @@ button {
 }
 
 canvas {
+  display: block;
   width: 100%;
   height: 100%;
-  flex: 1;
   border-radius: 14px;
   outline: 1px solid rgba(60, 40, 20, 0.12);
   cursor: crosshair;

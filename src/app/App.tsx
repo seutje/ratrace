@@ -14,7 +14,7 @@ type CanvasSize = {
 
 export const App = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const frameRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState<CanvasSize>({ width: 960, height: 640 });
 
   const world = useWorldStore((state) => state.world);
@@ -31,8 +31,8 @@ export const App = () => {
   useSimulationLoop(advanceElapsed);
 
   useEffect(() => {
-    const container = frameRef.current;
-    if (!container) {
+    const stage = stageRef.current;
+    if (!stage) {
       return;
     }
 
@@ -47,7 +47,7 @@ export const App = () => {
       });
     });
 
-    observer.observe(container);
+    observer.observe(stage);
     return () => observer.disconnect();
   }, []);
 
@@ -106,7 +106,7 @@ export const App = () => {
       <div className="background-glow" />
       <Hud world={world} />
       <section className="content">
-        <div className="canvas-frame panel" ref={frameRef}>
+        <div className="canvas-frame panel">
           <div className="canvas-header">
             <div>
               <h1>RatRace</h1>
@@ -114,7 +114,9 @@ export const App = () => {
             </div>
             <span>{paused ? 'Paused' : 'Live'}</span>
           </div>
-          <canvas aria-label="RatRace world canvas" ref={canvasRef} onClick={handleCanvasClick} />
+          <div className="canvas-stage" ref={stageRef}>
+            <canvas aria-label="RatRace world canvas" ref={canvasRef} onClick={handleCanvasClick} />
+          </div>
         </div>
         <aside className="sidebar">
           <Controls
