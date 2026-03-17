@@ -1,6 +1,8 @@
 export const ticksPerSecond = 60;
 export const gameMinutesPerTick = 1;
 export const msPerTick = 1000 / ticksPerSecond;
+export const MAX_FRAME_ADVANCE_STEPS = 4;
+export const MAX_FRAME_ADVANCE_MS = msPerTick * MAX_FRAME_ADVANCE_STEPS;
 export const dayMinutes = 24 * 60;
 
 export const WORK_START_MINUTE = 9 * 60;

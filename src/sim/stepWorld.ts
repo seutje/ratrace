@@ -68,6 +68,7 @@ const overlapAllowedTileTypes = new Set<TileType>([
 ]);
 const ROAD_RIGHT_OF_WAY_EPSILON = 1e-3;
 type OccupancyReservations = Map<string, number>;
+type StaffedCommercialCounts = Map<string, number>;
 type StepBuildingIndex = {
   byId: Map<string, Building>;
   residential: Building[];
@@ -461,7 +462,13 @@ const packLunchFromHome = (agent: Agent, home: Building) => {
   return true;
 };
 
-const arriveAtBuilding = (agent: Agent, building: Building, buildingIndex: StepBuildingIndex, world: WorldState) => {
+const arriveAtBuilding = (
+  agent: Agent,
+  building: Building,
+  buildingIndex: StepBuildingIndex,
+  staffedCommercialCounts: StaffedCommercialCounts,
+  world: WorldState,
+) => {
   if (agent.destination?.kind === 'work' && building.id === agent.workId) {
     recordShiftWork(agent, building, world);
     return;
@@ -503,7 +510,7 @@ const arriveAtBuilding = (agent: Agent, building: Building, buildingIndex: StepB
         pantryGap > 0 &&
         agent.wallet >= SHOP_PRICE &&
         building.stock > 0 &&
-        hasStaffedCommercialWorker(world, building) &&
+        (staffedCommercialCounts.get(building.id) ?? 0) > 0 &&
         agent.lastShoppedTick !== world.tick
       ) {
         const transferredUnits = Math.min(SHOPPING_BASKET_UNITS, pantryGap, building.stock);
@@ -581,15 +588,60 @@ const isOnBuildingTile = (agent: Agent, building?: Building) => {
   return tile.x === building.tile.x && tile.y === building.tile.y;
 };
 
-const hasStaffedCommercialWorker = (world: WorldState, building: Building) =>
-  world.entities.agents.some(
-    (agent) => agent.workId === building.id && isOnBuildingTile(agent, building) && (hasActiveShift(agent) || isShiftDue(world, agent)),
-  );
+const getStaffedCommercialBuildingId = (world: WorldState, buildingIndex: StepBuildingIndex, agent: Agent) => {
+  const work = getBuilding(buildingIndex, agent.workId);
+  if (!work || work.kind !== BuildingKind.Commercial) {
+    return undefined;
+  }
 
-const canServeShopper = (world: WorldState, building: Building) =>
-  building.kind === BuildingKind.Commercial && building.stock > 0 && hasStaffedCommercialWorker(world, building);
+  if (!isOnBuildingTile(agent, work)) {
+    return undefined;
+  }
 
-const determineDestination = (world: WorldState, buildingIndex: StepBuildingIndex, agent: Agent): AgentDestination | undefined => {
+  return hasActiveShift(agent) || isShiftDue(world, agent) ? work.id : undefined;
+};
+
+const addStaffedCommercialWorker = (counts: StaffedCommercialCounts, buildingId?: string) => {
+  if (!buildingId) {
+    return;
+  }
+
+  counts.set(buildingId, (counts.get(buildingId) ?? 0) + 1);
+};
+
+const removeStaffedCommercialWorker = (counts: StaffedCommercialCounts, buildingId?: string) => {
+  if (!buildingId) {
+    return;
+  }
+
+  const next = (counts.get(buildingId) ?? 0) - 1;
+  if (next > 0) {
+    counts.set(buildingId, next);
+    return;
+  }
+
+  counts.delete(buildingId);
+};
+
+const createStaffedCommercialCounts = (world: WorldState, buildingIndex: StepBuildingIndex) => {
+  const staffedCounts: StaffedCommercialCounts = new Map();
+
+  for (const agent of world.entities.agents) {
+    addStaffedCommercialWorker(staffedCounts, getStaffedCommercialBuildingId(world, buildingIndex, agent));
+  }
+
+  return staffedCounts;
+};
+
+const canServeShopper = (staffedCommercialCounts: StaffedCommercialCounts, building: Building) =>
+  building.kind === BuildingKind.Commercial && building.stock > 0 && (staffedCommercialCounts.get(building.id) ?? 0) > 0;
+
+const determineDestination = (
+  world: WorldState,
+  buildingIndex: StepBuildingIndex,
+  staffedCommercialCounts: StaffedCommercialCounts,
+  agent: Agent,
+): AgentDestination | undefined => {
   const home = getBuilding(buildingIndex, agent.homeId);
   const work = getBuilding(buildingIndex, agent.workId);
   const tile = getAgentCurrentTile(agent);
@@ -620,7 +672,9 @@ const determineDestination = (world: WorldState, buildingIndex: StepBuildingInde
     homeNeedsPantryRefill(home) &&
     (isOnBuildingTile(agent, home) || agent.destination?.kind === 'shop');
   if ((emergencyFoodRun || pantryRunFromHome) && agent.wallet >= SHOP_PRICE && shoppingCooldownElapsed) {
-    const shop = nearestBuilding(buildingIndex, tile, BuildingKind.Commercial, (building) => canServeShopper(world, building));
+    const shop = nearestBuilding(buildingIndex, tile, BuildingKind.Commercial, (building) =>
+      canServeShopper(staffedCommercialCounts, building),
+    );
     if (shop) {
       return { buildingId: shop.id, kind: 'shop' };
     }
@@ -663,15 +717,17 @@ const applyDestinationState = (agent: Agent, destination?: AgentDestination) => 
 const routeAgent = (
   world: WorldState,
   buildingIndex: StepBuildingIndex,
+  staffedCommercialCounts: StaffedCommercialCounts,
   agent: Agent,
   reservations: OccupancyReservations,
 ) => {
+  const staffedBefore = getStaffedCommercialBuildingId(world, buildingIndex, agent);
   activateShiftIfDue(world, agent);
   const home = getBuilding(buildingIndex, agent.homeId);
   if (home && !isOnBuildingTile(agent, home)) {
     consumePackedLunch(agent);
   }
-  const destination = determineDestination(world, buildingIndex, agent);
+  const destination = determineDestination(world, buildingIndex, staffedCommercialCounts, agent);
   if (!destination) {
     if (home && isOnBuildingTile(agent, home) && agent.state !== AgentState.Sleeping) {
       consumePantryMeal(agent, home);
@@ -680,6 +736,11 @@ const routeAgent = (
     agent.route = [];
     agent.routeIndex = 0;
     agent.state = AgentState.Idle;
+    const staffedAfter = getStaffedCommercialBuildingId(world, buildingIndex, agent);
+    if (staffedBefore !== staffedAfter) {
+      removeStaffedCommercialWorker(staffedCommercialCounts, staffedBefore);
+      addStaffedCommercialWorker(staffedCommercialCounts, staffedAfter);
+    }
     return;
   }
 
@@ -701,7 +762,7 @@ const routeAgent = (
     agent.destination = destination;
     agent.route = [];
     agent.routeIndex = 0;
-    arriveAtBuilding(agent, building, buildingIndex, world);
+    arriveAtBuilding(agent, building, buildingIndex, staffedCommercialCounts, world);
     return;
   }
 
@@ -711,7 +772,13 @@ const routeAgent = (
 
   const arrivedTile = getAgentCurrentTile(agent);
   if (arrivedTile.x === building.tile.x && arrivedTile.y === building.tile.y) {
-    arriveAtBuilding(agent, building, buildingIndex, world);
+    arriveAtBuilding(agent, building, buildingIndex, staffedCommercialCounts, world);
+  }
+
+  const staffedAfter = getStaffedCommercialBuildingId(world, buildingIndex, agent);
+  if (staffedBefore !== staffedAfter) {
+    removeStaffedCommercialWorker(staffedCommercialCounts, staffedBefore);
+    addStaffedCommercialWorker(staffedCommercialCounts, staffedAfter);
   }
 };
 
@@ -835,9 +902,10 @@ export const stepWorld = (inputWorld: WorldState): WorldState => {
   computeTraffic(world);
   restockCommercialBuildings(world, buildingIndex);
   const reservations = createOccupancyReservations(world);
+  const staffedCommercialCounts = createStaffedCommercialCounts(world, buildingIndex);
   for (const agent of world.entities.agents) {
     updateAgentStats(agent);
-    routeAgent(world, buildingIndex, agent, reservations);
+    routeAgent(world, buildingIndex, staffedCommercialCounts, agent, reservations);
   }
   runPopulationTurnover(world, buildingIndex);
   updateEconomyTotals(world);
@@ -845,11 +913,19 @@ export const stepWorld = (inputWorld: WorldState): WorldState => {
   return world;
 };
 
-export const advanceWorld = (world: WorldState, elapsedMs: number, carryMs = 0): SimulationAdvanceResult => {
+export const advanceWorld = (
+  world: WorldState,
+  elapsedMs: number,
+  carryMs = 0,
+  options?: { maxElapsedMs?: number },
+): SimulationAdvanceResult => {
   let currentWorld = world;
   let budget = carryMs + elapsedMs;
   let stepsApplied = 0;
   const epsilon = 1e-9;
+  const maxElapsedMs = options?.maxElapsedMs ?? Number.POSITIVE_INFINITY;
+
+  budget = Math.min(budget, maxElapsedMs);
 
   while (budget + epsilon >= msPerTick) {
     currentWorld = stepWorld(currentWorld);

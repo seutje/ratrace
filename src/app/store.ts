@@ -1,10 +1,14 @@
 import { create } from 'zustand';
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
-import { HOME_PANTRY_UNITS_PER_RESIDENT, STARTER_WORLD_SEED } from '../sim/constants';
-import { pickEmploymentAssignment } from '../sim/employment';
-import { TileType, BuildMode, BuildingKind, WorldState } from '../sim/types';
+import { MAX_FRAME_ADVANCE_MS, STARTER_WORLD_SEED } from '../sim/constants';
+import { BuildMode, WorldState } from '../sim/types';
+import {
+  SimulationWorkerInboundMessage,
+  SimulationWorkerOutboundMessage,
+} from '../sim/simulationWorkerTypes';
+import { paintWorldTile, selectWorldAgent } from '../sim/worldMutations';
 import { createStarterWorld } from '../sim/world';
-import { getTile, pointToTile, setTile } from '../sim/utils';
+import { pointToTile } from '../sim/utils';
 
 type WorldStore = {
   world: WorldState;
@@ -21,141 +25,205 @@ type WorldStore = {
   paintTile: (x: number, y: number, type: BuildMode) => void;
 };
 
-const buildingKindForTile = (type: TileType) => {
-  if (type === TileType.Residential) {
-    return BuildingKind.Residential;
-  }
-  if (type === TileType.Commercial) {
-    return BuildingKind.Commercial;
-  }
-  if (type === TileType.Industrial) {
-    return BuildingKind.Industrial;
-  }
-  return undefined;
+let simulationWorker: Worker | null = null;
+let pendingElapsedMs = 0;
+let advanceInFlight = false;
+
+const postSimulationWorkerMessage = (message: SimulationWorkerInboundMessage) => {
+  simulationWorker?.postMessage(message);
 };
 
-const reassignInvalidReferences = (world: WorldState) => {
-  const homes = world.entities.buildings.filter((building) => building.kind === BuildingKind.Residential);
-  const workplaces = world.entities.buildings.filter((building) => building.kind !== BuildingKind.Residential);
+const flushQueuedAdvance = () => {
+  if (!simulationWorker || advanceInFlight || pendingElapsedMs <= 0) {
+    return;
+  }
 
-  world.entities.agents.forEach((agent) => {
-    if (!homes.some((building) => building.id === agent.homeId) && homes[0]) {
-      agent.homeId = homes[0].id;
-    }
-
-    if (!workplaces.some((building) => building.id === agent.workId)) {
-      const assignment = pickEmploymentAssignment(
-        world.entities.buildings,
-        world.entities.agents
-          .filter((entry) => entry.id !== agent.id)
-          .map((entry) => ({
-            workId: entry.workId,
-            shiftStartMinute: entry.shiftStartMinute,
-          })),
-      );
-
-      if (assignment) {
-        agent.workId = assignment.workId;
-        agent.shiftStartMinute = assignment.shiftStartMinute;
-      }
-    }
+  const elapsedMs = pendingElapsedMs;
+  pendingElapsedMs = 0;
+  advanceInFlight = true;
+  postSimulationWorkerMessage({
+    type: 'advance',
+    elapsedMs,
+    maxElapsedMs: MAX_FRAME_ADVANCE_MS,
   });
 };
 
-export const useWorldStore = create<WorldStore>((set) => ({
+const applyWorkerSnapshot = (message: SimulationWorkerOutboundMessage) => {
+  advanceInFlight = false;
+  useWorldStore.setState((state) => ({
+    ...state,
+    world: message.world,
+    carryMs: message.carryMs,
+  }));
+
+  if (!useWorldStore.getState().paused) {
+    flushQueuedAdvance();
+  }
+};
+
+export const startSimulationWorker = () => {
+  if (typeof Worker === 'undefined' || simulationWorker) {
+    return;
+  }
+
+  try {
+    simulationWorker = new Worker(new URL('../sim/simulationWorker.ts', import.meta.url), {
+      type: 'module',
+    });
+  } catch {
+    simulationWorker = null;
+    return;
+  }
+  simulationWorker.onmessage = (event: MessageEvent<SimulationWorkerOutboundMessage>) => {
+    if (event.data.type === 'snapshot') {
+      applyWorkerSnapshot(event.data);
+    }
+  };
+
+  const state = useWorldStore.getState();
+  postSimulationWorkerMessage({
+    type: 'init',
+    world: state.world,
+    carryMs: state.carryMs,
+  });
+};
+
+export const stopSimulationWorker = () => {
+  pendingElapsedMs = 0;
+  advanceInFlight = false;
+  simulationWorker?.terminate();
+  simulationWorker = null;
+};
+
+export const useWorldStore = create<WorldStore>((set, get) => ({
   world: createStarterWorld(),
   paused: false,
   buildMode: 'select',
   carryMs: 0,
-  bootstrap: (seed = STARTER_WORLD_SEED) =>
+  bootstrap: (seed = STARTER_WORLD_SEED) => {
+    pendingElapsedMs = 0;
+    if (simulationWorker) {
+      set({
+        paused: false,
+      });
+      postSimulationWorkerMessage({
+        type: 'bootstrap',
+        seed,
+      });
+      return;
+    }
+
     set({
       world: createStarterWorld(seed),
       carryMs: 0,
       paused: false,
-    }),
-  reset: () =>
+    });
+    postSimulationWorkerMessage({
+      type: 'bootstrap',
+      seed,
+    });
+  },
+  reset: () => {
+    pendingElapsedMs = 0;
+    if (simulationWorker) {
+      set({
+        paused: false,
+      });
+      postSimulationWorkerMessage({
+        type: 'reset',
+      });
+      return;
+    }
+
     set({
       world: createStarterWorld(),
       paused: false,
       carryMs: 0,
-    }),
-  setPaused: (paused) => set({ paused }),
-  singleStep: () =>
+    });
+    postSimulationWorkerMessage({
+      type: 'reset',
+    });
+  },
+  setPaused: (paused) => {
+    set({ paused });
+    if (!paused) {
+      flushQueuedAdvance();
+    } else {
+      pendingElapsedMs = 0;
+    }
+  },
+  singleStep: () => {
+    if (simulationWorker) {
+      postSimulationWorkerMessage({
+        type: 'step',
+      });
+      return;
+    }
+
     set((state) => ({
       world: stepWorld(state.world),
-    })),
-  advanceElapsed: (elapsedMs) =>
+    }));
+  },
+  advanceElapsed: (elapsedMs) => {
+    if (get().paused) {
+      return;
+    }
+
+    if (simulationWorker) {
+      pendingElapsedMs += elapsedMs;
+      flushQueuedAdvance();
+      return;
+    }
+
     set((state) => {
       if (state.paused) {
         return state;
       }
 
-      const advanced = advanceWorld(state.world, elapsedMs, state.carryMs);
+      const advanced = advanceWorld(state.world, elapsedMs, state.carryMs, {
+        maxElapsedMs: MAX_FRAME_ADVANCE_MS,
+      });
       return {
         world: advanced.world,
         carryMs: advanced.carryMs,
       };
-    }),
-  selectAgent: (agentId) =>
+    });
+  },
+  selectAgent: (agentId) => {
+    if (simulationWorker) {
+      postSimulationWorkerMessage({
+        type: 'selectAgent',
+        agentId,
+      });
+      return;
+    }
+
     set((state) => ({
-      world: {
-        ...state.world,
-        selectedAgentId: agentId,
-      },
-    })),
+      world: selectWorldAgent(state.world, agentId),
+    }));
+  },
   setBuildMode: (mode) => set({ buildMode: mode }),
-  paintTile: (x, y, mode) =>
+  paintTile: (x, y, mode) => {
+    if (mode === 'select') {
+      return;
+    }
+
+    if (simulationWorker) {
+      postSimulationWorkerMessage({
+        type: 'paintTile',
+        x,
+        y,
+        mode,
+      });
+      return;
+    }
+
     set((state) => {
-      if (mode === 'select') {
-        return state;
-      }
-
-      const world = structuredClone(state.world) as WorldState;
-      const point = { x, y };
-      const existingTile = getTile(world, point);
-      if (!existingTile) {
-        return state;
-      }
-
-      const nextType = mode as TileType;
-      const previousBuildingId = existingTile.buildingId;
-      if (previousBuildingId) {
-        world.entities.buildings = world.entities.buildings.filter((building) => building.id !== previousBuildingId);
-      }
-
-      const tile = {
-        ...existingTile,
-        type: nextType,
-        buildingId: undefined,
-      };
-      setTile(world, point, tile);
-
-      const buildingKind = buildingKindForTile(nextType);
-      if (buildingKind) {
-        const buildingId = `build-${world.metrics.mapVersion + 1}-${x}-${y}`;
-        world.entities.buildings.push({
-          id: buildingId,
-          kind: buildingKind,
-          tile: point,
-          stock: buildingKind === BuildingKind.Commercial ? 4 : buildingKind === BuildingKind.Industrial ? 2 : 0,
-          capacity: buildingKind === BuildingKind.Residential ? 2 : 4,
-          pantryStock: buildingKind === BuildingKind.Residential ? 2 * HOME_PANTRY_UNITS_PER_RESIDENT : 0,
-          pantryCapacity: buildingKind === BuildingKind.Residential ? 2 * HOME_PANTRY_UNITS_PER_RESIDENT : 0,
-          label: `${buildingKind.toLowerCase()}-${x}-${y}`,
-        });
-        setTile(world, point, {
-          ...tile,
-          buildingId,
-        });
-      }
-
-      world.metrics.mapVersion += 1;
-      reassignInvalidReferences(world);
-
       return {
-        world,
+        world: paintWorldTile(state.world, x, y, mode),
       };
-    }),
+    });
+  },
 }));
 
 export const selectSelectedAgent = (world: WorldState) =>

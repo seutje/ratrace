@@ -14,7 +14,13 @@ import { BuildMenu } from '../ui/BuildMenu';
 import { Controls } from '../ui/Controls';
 import { Hud } from '../ui/Hud';
 import { Inspector } from '../ui/Inspector';
-import { findAgentAtCanvasPoint, tileFromCanvasPoint, useWorldStore } from './store';
+import {
+  findAgentAtCanvasPoint,
+  startSimulationWorker,
+  stopSimulationWorker,
+  tileFromCanvasPoint,
+  useWorldStore,
+} from './store';
 
 type CanvasSize = {
   width: number;
@@ -43,6 +49,11 @@ export const App = () => {
   const setBuildMode = useWorldStore((state) => state.setBuildMode);
   const selectAgent = useWorldStore((state) => state.selectAgent);
   const paintTile = useWorldStore((state) => state.paintTile);
+
+  useEffect(() => {
+    startSimulationWorker();
+    return () => stopSimulationWorker();
+  }, []);
 
   useSimulationLoop(advanceElapsed);
 
