@@ -17,12 +17,12 @@ import {
   SLEEP_ENERGY_THRESHOLD,
   SLEEP_START_MINUTE,
   STARVATION_CULL_DAYS,
-  WORK_START_MINUTE,
   WORK_SHIFT_MINUTES,
   dayMinutes,
   gameMinutesPerTick,
   msPerTick,
 } from './constants';
+import { pickEmploymentAssignment } from './employment';
 import { findPath } from './pathfinding';
 import { getCongestionSpeedFactor } from './traffic';
 import {
@@ -53,9 +53,11 @@ import {
   getRouteTargetPoint,
 } from './lanes';
 
-const isPastWorkStart = (minutes: number) => minutes >= WORK_START_MINUTE;
+const isPastShiftStart = (world: WorldState, agent: Agent) => world.minutesOfDay >= agent.shiftStartMinute;
 const isSleepHours = (minutes: number) => minutes >= SLEEP_START_MINUTE || minutes < SLEEP_END_MINUTE;
 const hasActiveShift = (agent: Agent) => agent.shiftDay > 0 && agent.shiftWorkMinutes < WORK_SHIFT_MINUTES;
+const isShiftDue = (world: WorldState, agent: Agent) =>
+  isPastShiftStart(world, agent) && agent.shiftDay < world.day && agent.lastCompletedShiftDay < world.day;
 const isCommittedToSleep = (agent: Agent, world: WorldState) =>
   agent.sleepUntilTick !== undefined && world.tick < agent.sleepUntilTick;
 const overlapAllowedTileTypes = new Set<TileType>([
@@ -380,10 +382,7 @@ const moveAgent = (world: WorldState, agent: Agent, reservations: OccupancyReser
 };
 
 const activateShiftIfDue = (world: WorldState, agent: Agent) => {
-  const shouldStartShift =
-    isPastWorkStart(world.minutesOfDay) && agent.shiftDay < world.day && agent.lastCompletedShiftDay < world.day;
-
-  if (!shouldStartShift) {
+  if (!isShiftDue(world, agent)) {
     return;
   }
 
@@ -398,12 +397,14 @@ const recordShiftWork = (agent: Agent, building: Building, world: WorldState) =>
   }
 
   agent.state = AgentState.Working;
-  agent.thought = 'Clocked in.';
+  agent.thought = building.kind === BuildingKind.Commercial ? 'Working the counter.' : 'Clocked in.';
   agent.shiftWorkMinutes = Math.min(agent.shiftWorkMinutes + gameMinutesPerTick, WORK_SHIFT_MINUTES);
 
   while (agent.shiftWorkMinutes - agent.paidShiftWorkMinutes >= 60) {
     agent.wallet += HOURLY_WAGE;
-    building.stock += INDUSTRIAL_OUTPUT_PER_HOUR;
+    if (building.kind === BuildingKind.Industrial) {
+      building.stock += INDUSTRIAL_OUTPUT_PER_HOUR;
+    }
     world.economy.treasury = Math.max(0, world.economy.treasury - HOURLY_WAGE);
     agent.paidShiftWorkMinutes += 60;
   }
@@ -427,6 +428,11 @@ const consumePantryMeal = (agent: Agent, home: Building) => {
 };
 
 const arriveAtBuilding = (agent: Agent, building: Building, buildingIndex: StepBuildingIndex, world: WorldState) => {
+  if (agent.destination?.kind === 'work' && building.id === agent.workId) {
+    recordShiftWork(agent, building, world);
+    return;
+  }
+
   switch (building.kind) {
     case BuildingKind.Residential: {
       if (agent.state !== AgentState.Sleeping) {
@@ -463,6 +469,7 @@ const arriveAtBuilding = (agent: Agent, building: Building, buildingIndex: StepB
         pantryGap > 0 &&
         agent.wallet >= SHOP_PRICE &&
         building.stock > 0 &&
+        hasStaffedCommercialWorker(world, building) &&
         agent.lastShoppedTick !== world.tick
       ) {
         const transferredUnits = Math.min(SHOPPING_BASKET_UNITS, pantryGap, building.stock);
@@ -539,6 +546,11 @@ const isOnBuildingTile = (agent: Agent, building?: Building) => {
   const tile = getAgentCurrentTile(agent);
   return tile.x === building.tile.x && tile.y === building.tile.y;
 };
+
+const hasStaffedCommercialWorker = (world: WorldState, building: Building) =>
+  world.entities.agents.some(
+    (agent) => agent.workId === building.id && isOnBuildingTile(agent, building) && (hasActiveShift(agent) || isShiftDue(world, agent)),
+  );
 
 const determineDestination = (world: WorldState, buildingIndex: StepBuildingIndex, agent: Agent): AgentDestination | undefined => {
   const home = getBuilding(buildingIndex, agent.homeId);
@@ -722,14 +734,15 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
     }
 
     const home = homes.find((building) => (occupied.get(building.id) ?? 0) < building.capacity);
-    let work: Building | undefined;
-    for (const workplace of getBuildingsByKind(buildingIndex, BuildingKind.Industrial)) {
-      if (!work || workplace.stock < work.stock) {
-        work = workplace;
-      }
-    }
+    const assignment = pickEmploymentAssignment(
+      world.entities.buildings,
+      world.entities.agents.map((agent) => ({
+        workId: agent.workId,
+        shiftStartMinute: agent.shiftStartMinute,
+      })),
+    );
 
-    if (home && work) {
+    if (home && assignment) {
       world.entities.agents.push({
         id: nextAgentId(world),
         name: `Newcomer ${world.day}`,
@@ -737,7 +750,7 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
         wallet: 18,
         stats: { hunger: 24, energy: 72, happiness: 64 },
         homeId: home.id,
-        workId: work.id,
+        workId: assignment.workId,
         state: AgentState.Idle,
         thought: 'Just moved in.',
         route: [],
@@ -747,6 +760,7 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
         destination: undefined,
         lastShoppedTick: undefined,
         sleepUntilTick: undefined,
+        shiftStartMinute: assignment.shiftStartMinute,
         shiftDay: 0,
         shiftWorkMinutes: 0,
         paidShiftWorkMinutes: 0,

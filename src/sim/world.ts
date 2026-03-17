@@ -12,6 +12,7 @@ import {
   STARTER_RESIDENTIAL_CAPACITY,
   STARTER_ROAD_SPACING,
 } from './constants';
+import { createEmploymentAssignments } from './employment';
 import { createRng } from './random';
 import { AgentState, Building, BuildingKind, Point, Tile, TileType, WorldState } from './types';
 import { getTileIndex } from './utils';
@@ -327,16 +328,20 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
   });
 
   const homes = buildings.filter((building) => building.kind === BuildingKind.Residential);
-  const workplaces = buildings.filter((building) => building.kind === BuildingKind.Industrial);
   const homeSlots = homes.flatMap((home) => Array.from({ length: home.capacity }, () => home));
+  const employmentAssignments = createEmploymentAssignments(STARTER_POPULATION, buildings);
 
   if (homeSlots.length < STARTER_POPULATION) {
     throw new Error('Starter world does not provide enough housing capacity.');
   }
 
+  if (employmentAssignments.length < STARTER_POPULATION) {
+    throw new Error('Starter world does not provide enough workplaces.');
+  }
+
   const agents = Array.from({ length: STARTER_POPULATION }, (_, index) => {
     const home = homeSlots[index]!;
-    const workId = workplaces[index % workplaces.length].id;
+    const assignment = employmentAssignments[index]!;
     return {
       id: `agent-${index + 1}`,
       name: createAgentName(rng),
@@ -348,7 +353,7 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
         happiness: Math.floor(60 + rng() * 20),
       },
       homeId: home.id,
-      workId,
+      workId: assignment.workId,
       state: AgentState.Idle,
       thought: 'Settling in.',
       route: [],
@@ -358,6 +363,7 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
       destination: undefined,
       lastShoppedTick: undefined,
       sleepUntilTick: undefined,
+      shiftStartMinute: assignment.shiftStartMinute,
       shiftDay: 0,
       shiftWorkMinutes: 0,
       paidShiftWorkMinutes: 0,

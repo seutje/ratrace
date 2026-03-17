@@ -1,4 +1,5 @@
 import { createBlankWorld, createStarterWorld } from '../sim/world';
+import { COMMERCIAL_SHIFT_PROFILES, COMMERCIAL_WORKER_SHARE, INDUSTRIAL_SHIFT_PROFILES } from '../sim/employment';
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
 import {
   SLEEP_MINIMUM_MINUTES,
@@ -47,6 +48,7 @@ const makeTestAgent = (overrides: Partial<WorldState['entities']['agents'][numbe
   destination: undefined,
   lastShoppedTick: undefined,
   sleepUntilTick: undefined,
+  shiftStartMinute: 8 * 60,
   shiftDay: 0,
   shiftWorkMinutes: 0,
   paidShiftWorkMinutes: 0,
@@ -100,6 +102,22 @@ const nearestDistanceToKind = (
       .map((candidate) => Math.hypot(candidate.tile.x - building.tile.x, candidate.tile.y - building.tile.y)),
   );
 
+const ensureStaffedShop = (world: WorldState, shop: WorldState['entities']['buildings'][number]) => {
+  const clerk = world.entities.agents.find((agent) => agent.workId === shop.id) ?? world.entities.agents[1]!;
+  clerk.workId = shop.id;
+  clerk.pos = tileCenter(shop.tile);
+  clerk.route = [];
+  clerk.routeIndex = 0;
+  clerk.shiftStartMinute = COMMERCIAL_SHIFT_PROFILES[1]!.startMinute;
+  clerk.shiftDay = world.day;
+  clerk.shiftWorkMinutes = 60;
+  clerk.paidShiftWorkMinutes = 60;
+  clerk.lastCompletedShiftDay = world.day - 1;
+  clerk.destination = { buildingId: shop.id, kind: 'work' };
+  clerk.state = AgentState.Working;
+  return clerk;
+};
+
 describe('world generation', () => {
   it('creates the same starter world for the same seed', () => {
     expect(createStarterWorld(11)).toEqual(createStarterWorld(11));
@@ -119,6 +137,28 @@ describe('world generation', () => {
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Commercial)).toBe(true);
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Industrial)).toBe(true);
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Residential && building.pantryCapacity > 0)).toBe(true);
+  });
+
+  it('assigns commercial jobs and staggered shifts across the workforce', () => {
+    const world = createStarterWorld();
+    const buildingsById = new Map(world.entities.buildings.map((building) => [building.id, building]));
+    const commercialWorkers = world.entities.agents.filter(
+      (agent) => buildingsById.get(agent.workId)?.kind === BuildingKind.Commercial,
+    );
+    const industrialWorkers = world.entities.agents.filter(
+      (agent) => buildingsById.get(agent.workId)?.kind === BuildingKind.Industrial,
+    );
+
+    expect(commercialWorkers.length).toBe(Math.round(STARTER_POPULATION * COMMERCIAL_WORKER_SHARE));
+    expect(new Set(industrialWorkers.map((agent) => agent.shiftStartMinute))).toEqual(
+      new Set(INDUSTRIAL_SHIFT_PROFILES.map((profile) => profile.startMinute)),
+    );
+    expect(new Set(commercialWorkers.map((agent) => agent.shiftStartMinute))).toEqual(
+      new Set(COMMERCIAL_SHIFT_PROFILES.map((profile) => profile.startMinute)),
+    );
+    expect(
+      commercialWorkers.filter((agent) => agent.shiftStartMinute >= COMMERCIAL_SHIFT_PROFILES[1]!.startMinute).length,
+    ).toBeGreaterThan(commercialWorkers.length / 2);
   });
 
   it('connects all starter buildings to one shared road network', () => {
@@ -365,9 +405,13 @@ describe('economy', () => {
     afterWork.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
     afterWork.lastCompletedShiftDay = world.day;
     const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
+    ensureStaffedShop(world, shop);
     const home = world.entities.buildings.find((building) => building.id === afterWork.homeId)!;
     home.pantryStock = 0;
     afterWork.pos = tileCenter(shop.tile);
+    afterWork.route = [];
+    afterWork.routeIndex = 0;
+    afterWork.destination = undefined;
     afterWork.stats.hunger = 90;
     world.minutesOfDay = 18 * 60;
     const walletBeforeShopping = afterWork.wallet;
@@ -380,6 +424,29 @@ describe('economy', () => {
     expect(world.entities.buildings.find((building) => building.id === shop.id)!.stock).toBe(
       shopStockBefore - Math.min(SHOPPING_BASKET_UNITS, shopStockBefore),
     );
+  });
+
+  it('requires a staffed store before an agent can buy food', () => {
+    let world = createStarterWorld();
+    const customer = world.entities.agents[0]!;
+    const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
+    const home = world.entities.buildings.find((building) => building.id === customer.homeId)!;
+    customer.wallet = 100;
+    customer.stats.hunger = 100;
+    customer.shiftDay = world.day;
+    customer.shiftWorkMinutes = WORK_SHIFT_MINUTES;
+    customer.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
+    customer.lastCompletedShiftDay = world.day;
+    customer.pos = tileCenter(shop.tile);
+    home.pantryStock = 0;
+    world.entities.agents = [customer];
+    world.minutesOfDay = 18 * 60;
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents[0]!.wallet).toBe(100);
+    expect(world.entities.buildings.find((building) => building.id === shop.id)!.stock).toBe(shop.stock);
+    expect(world.entities.buildings.find((building) => building.id === home.id)!.pantryStock).toBe(0);
   });
 
   it('prevents shopping when wallet is zero', () => {
@@ -408,6 +475,7 @@ describe('economy', () => {
     let world = createStarterWorld();
     const agent = world.entities.agents[0]!;
     const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
+    ensureStaffedShop(world, shop);
     const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
 
     agent.wallet = 100;
@@ -437,6 +505,7 @@ describe('economy', () => {
     let world = createStarterWorld();
     const agent = world.entities.agents[0]!;
     const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
+    ensureStaffedShop(world, shop);
     const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
 
     agent.wallet = 100;
@@ -466,6 +535,7 @@ describe('economy', () => {
     let world = createStarterWorld();
     const agent = world.entities.agents[0]!;
     const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
+    ensureStaffedShop(world, shop);
     const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
 
     agent.wallet = 100;

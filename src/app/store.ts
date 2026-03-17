@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
 import { HOME_PANTRY_UNITS_PER_RESIDENT, STARTER_WORLD_SEED } from '../sim/constants';
+import { pickEmploymentAssignment } from '../sim/employment';
 import { TileType, BuildMode, BuildingKind, WorldState } from '../sim/types';
 import { createStarterWorld } from '../sim/world';
 import { getTile, pointToTile, setTile } from '../sim/utils';
@@ -35,14 +36,28 @@ const buildingKindForTile = (type: TileType) => {
 
 const reassignInvalidReferences = (world: WorldState) => {
   const homes = world.entities.buildings.filter((building) => building.kind === BuildingKind.Residential);
-  const workplaces = world.entities.buildings.filter((building) => building.kind === BuildingKind.Industrial);
+  const workplaces = world.entities.buildings.filter((building) => building.kind !== BuildingKind.Residential);
 
   world.entities.agents.forEach((agent) => {
     if (!homes.some((building) => building.id === agent.homeId) && homes[0]) {
       agent.homeId = homes[0].id;
     }
-    if (!workplaces.some((building) => building.id === agent.workId) && workplaces[0]) {
-      agent.workId = workplaces[0].id;
+
+    if (!workplaces.some((building) => building.id === agent.workId)) {
+      const assignment = pickEmploymentAssignment(
+        world.entities.buildings,
+        world.entities.agents
+          .filter((entry) => entry.id !== agent.id)
+          .map((entry) => ({
+            workId: entry.workId,
+            shiftStartMinute: entry.shiftStartMinute,
+          })),
+      );
+
+      if (assignment) {
+        agent.workId = assignment.workId;
+        agent.shiftStartMinute = assignment.shiftStartMinute;
+      }
     }
   });
 };
