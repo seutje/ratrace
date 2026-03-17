@@ -39,11 +39,10 @@ import {
   distance,
   formatClock,
   getTile,
-  pointToTile,
   samePoint,
   toClockNumber,
 } from './utils';
-import { getAgentTrafficKey, getRouteTargetPoint } from './lanes';
+import { getAgentCurrentTile, getAgentTrafficKey, getRouteTargetPoint, getLaneDirection } from './lanes';
 
 const isPastWorkStart = (minutes: number) => minutes >= WORK_START_MINUTE;
 const isSleepHours = (minutes: number) => minutes >= SLEEP_START_MINUTE || minutes < SLEEP_END_MINUTE;
@@ -67,7 +66,7 @@ const computeTraffic = (world: WorldState) => {
   const traffic: Record<string, number> = {};
 
   world.entities.agents.forEach((agent) => {
-    const currentTile = pointToTile(agent.pos);
+    const currentTile = getAgentCurrentTile(agent);
     const currentTileType = getTile(world, currentTile)?.type ?? TileType.Empty;
     const key = getAgentTrafficKey(world, agent, currentTile, currentTileType);
     traffic[key] = (traffic[key] ?? 0) + 1;
@@ -85,7 +84,7 @@ const updateEconomyTotals = (world: WorldState) => {
 };
 
 const assignRoute = (world: WorldState, agent: Agent, destination: AgentDestination, targetPoint: Point) => {
-  const currentTile = pointToTile(agent.pos);
+  const currentTile = getAgentCurrentTile(agent);
   const needsRecompute =
     agent.destination?.buildingId !== destination.buildingId ||
     agent.destination?.kind !== destination.kind ||
@@ -114,12 +113,21 @@ const assignRoute = (world: WorldState, agent: Agent, destination: AgentDestinat
   world.metrics.pathComputations += 1;
 };
 
+const moveAxisToward = (current: number, target: number, maxStep: number) => {
+  const delta = target - current;
+  const used = Math.min(Math.abs(delta), maxStep);
+  return {
+    value: current + Math.sign(delta) * used,
+    used,
+  };
+};
+
 const moveAgent = (world: WorldState, agent: Agent) => {
   if (!agent.destination || agent.routeIndex >= agent.route.length) {
     return;
   }
 
-  const currentTile = pointToTile(agent.pos);
+  const currentTile = getAgentCurrentTile(agent);
   const currentTileType = getTile(world, currentTile)?.type ?? TileType.Empty;
   const occupancy = world.traffic[getAgentTrafficKey(world, agent, currentTile, currentTileType)] ?? 0;
   const congestionFactor = currentTileType === TileType.Road ? getCongestionSpeedFactor(occupancy) : 1;
@@ -132,6 +140,24 @@ const moveAgent = (world: WorldState, agent: Agent) => {
   if (remainingDistance <= stepDistance) {
     agent.pos = target;
     agent.routeIndex += 1;
+    return;
+  }
+
+  const targetTile = agent.route[agent.routeIndex];
+  const targetTileType = targetTile ? getTile(world, targetTile)?.type ?? TileType.Empty : TileType.Empty;
+  const direction = targetTile ? getLaneDirection(currentTile, targetTile) : undefined;
+
+  if (currentTileType === TileType.Road && targetTileType === TileType.Road && direction) {
+    if (direction === 'east' || direction === 'west') {
+      const yMove = moveAxisToward(agent.pos.y, target.y, stepDistance);
+      const xMove = moveAxisToward(agent.pos.x, target.x, stepDistance - yMove.used);
+      agent.pos = { x: xMove.value, y: yMove.value };
+      return;
+    }
+
+    const xMove = moveAxisToward(agent.pos.x, target.x, stepDistance);
+    const yMove = moveAxisToward(agent.pos.y, target.y, stepDistance - xMove.used);
+    agent.pos = { x: xMove.value, y: yMove.value };
     return;
   }
 
@@ -261,14 +287,14 @@ const isOnBuildingTile = (agent: Agent, building?: Building) => {
     return false;
   }
 
-  const tile = pointToTile(agent.pos);
+  const tile = getAgentCurrentTile(agent);
   return tile.x === building.tile.x && tile.y === building.tile.y;
 };
 
 const determineDestination = (world: WorldState, agent: Agent): AgentDestination | undefined => {
   const home = getBuilding(world, agent.homeId);
   const work = getBuilding(world, agent.workId);
-  const tile = pointToTile(agent.pos);
+  const tile = getAgentCurrentTile(agent);
   const shoppingCooldownElapsed =
     agent.lastShoppedTick === undefined || world.tick - agent.lastShoppedTick >= SHOPPING_COOLDOWN_TICKS;
   const sleepingAtHome =
@@ -350,7 +376,7 @@ const routeAgent = (world: WorldState, agent: Agent) => {
     return;
   }
 
-  const currentTile = pointToTile(agent.pos);
+  const currentTile = getAgentCurrentTile(agent);
   if (currentTile.x === building.tile.x && currentTile.y === building.tile.y) {
     agent.destination = destination;
     agent.route = [];
@@ -363,7 +389,7 @@ const routeAgent = (world: WorldState, agent: Agent) => {
   assignRoute(world, agent, destination, building.tile);
   moveAgent(world, agent);
 
-  const arrivedTile = pointToTile(agent.pos);
+  const arrivedTile = getAgentCurrentTile(agent);
   if (arrivedTile.x === building.tile.x && arrivedTile.y === building.tile.y) {
     arriveAtBuilding(agent, building, world);
   }

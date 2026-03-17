@@ -3,7 +3,7 @@ import { getTile, pointToTile, tileCenter, tileKey } from './utils';
 
 export type LaneDirection = 'east' | 'west' | 'north' | 'south';
 
-const LANE_OFFSET = 0.22;
+const LANE_OFFSET = 0.25;
 
 export const getLaneDirection = (from: Point, to: Point): LaneDirection | undefined => {
   const dx = to.x - from.x;
@@ -39,7 +39,19 @@ export const getRoadLaneCenter = (tile: Point, direction: LaneDirection): Point 
 };
 
 export const getAgentLaneDirection = (agent: Pick<Agent, 'pos' | 'route' | 'routeIndex'>): LaneDirection | undefined => {
-  return getAgentLaneDirectionFromTile(agent, pointToTile(agent.pos));
+  return getAgentLaneDirectionFromTile(agent, getAgentCurrentTile(agent));
+};
+
+export const getAgentCurrentTile = (agent: Pick<Agent, 'pos' | 'route' | 'routeIndex'>): Point => {
+  if (agent.routeIndex > 0 && agent.routeIndex <= agent.route.length) {
+    return agent.route[agent.routeIndex - 1]!;
+  }
+
+  if (agent.route.length > 0) {
+    return agent.route[agent.route.length - 1]!;
+  }
+
+  return pointToTile(agent.pos);
 };
 
 export const getAgentLaneDirectionFromTile = (
@@ -56,7 +68,7 @@ export const getAgentLaneDirectionFromTile = (
 export const getAgentTrafficKey = (
   world: Pick<WorldState, 'width' | 'height' | 'tiles'>,
   agent: Pick<Agent, 'pos' | 'route' | 'routeIndex'>,
-  currentTile = pointToTile(agent.pos),
+  currentTile = getAgentCurrentTile(agent),
   currentTileType = getTile(world, currentTile)?.type ?? TileType.Empty,
 ) => {
   const direction = currentTileType === TileType.Road ? getAgentLaneDirectionFromTile(agent, currentTile) : undefined;
@@ -66,7 +78,7 @@ export const getAgentTrafficKey = (
 export const getRouteTargetPoint = (
   world: Pick<WorldState, 'width' | 'height' | 'tiles'>,
   agent: Pick<Agent, 'pos' | 'route' | 'routeIndex'>,
-  currentTile = pointToTile(agent.pos),
+  currentTile = getAgentCurrentTile(agent),
 ) => {
   const targetTile = agent.route[agent.routeIndex];
   if (!targetTile) {

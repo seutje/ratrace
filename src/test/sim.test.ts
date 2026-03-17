@@ -519,9 +519,66 @@ describe('traffic and lifecycle', () => {
     const westboundTarget = getRouteTargetPoint(world, westbound);
 
     expect(eastboundTarget.x).toBeCloseTo(1.5);
-    expect(eastboundTarget.y).toBeGreaterThan(1.5);
+    expect(eastboundTarget.y).toBeCloseTo(1.75);
     expect(westboundTarget.x).toBeCloseTo(1.5);
-    expect(westboundTarget.y).toBeLessThan(1.5);
+    expect(westboundTarget.y).toBeCloseTo(1.25);
+  });
+
+  it('keeps a stable lane target when an agent is exactly on the lane boundary', () => {
+    const world = createBlankWorld(4, 4);
+    for (let x = 0; x < 4; x += 1) {
+      setTile(world, { x, y: 1 }, { x, y: 1, type: TileType.Road });
+    }
+
+    const eastbound = makeTestAgent({
+      pos: { x: 1.5, y: 2 },
+      route: [
+        { x: 1, y: 1 },
+        { x: 2, y: 1 },
+        { x: 3, y: 1 },
+      ],
+      routeIndex: 1,
+    });
+
+    expect(getAgentTrafficKey(world, eastbound)).toBe('1,1:east');
+    expect(getRouteTargetPoint(world, eastbound)).toEqual({ x: 2.5, y: 1.75 });
+  });
+
+  it('keeps road travel locked to the lane when stepping from a lane boundary', () => {
+    const world = createBlankWorld(5, 3);
+    setTile(world, { x: 0, y: 1 }, { x: 0, y: 1, type: TileType.Residential, buildingId: 'home' });
+    setTile(world, { x: 1, y: 1 }, { x: 1, y: 1, type: TileType.Road });
+    setTile(world, { x: 2, y: 1 }, { x: 2, y: 1, type: TileType.Road });
+    setTile(world, { x: 3, y: 1 }, { x: 3, y: 1, type: TileType.Road });
+    setTile(world, { x: 4, y: 1 }, { x: 4, y: 1, type: TileType.Industrial, buildingId: 'work' });
+
+    world.entities.buildings.push(
+      { id: 'home', kind: BuildingKind.Residential, tile: { x: 0, y: 1 }, stock: 0, capacity: 1, label: 'home' },
+      { id: 'work', kind: BuildingKind.Industrial, tile: { x: 4, y: 1 }, stock: 4, capacity: 1, label: 'work' },
+    );
+    world.entities.agents.push(
+      makeTestAgent({
+        pos: { x: 1.5, y: 2 },
+        homeId: 'home',
+        workId: 'work',
+        destination: { buildingId: 'work', kind: 'work' },
+        route: [
+          { x: 1, y: 1 },
+          { x: 2, y: 1 },
+          { x: 3, y: 1 },
+          { x: 4, y: 1 },
+        ],
+        routeIndex: 1,
+        routeMapVersion: world.metrics.mapVersion,
+        shiftDay: world.day,
+      }),
+    );
+
+    const nextWorld = stepWorld(world);
+    const movedAgent = nextWorld.entities.agents[0]!;
+
+    expect(movedAgent.pos.x).toBeCloseTo(1.5);
+    expect(movedAgent.pos.y).toBeCloseTo(1.85);
   });
 
   it('applies the congestion speed formula with a floor', () => {
