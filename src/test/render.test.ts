@@ -6,9 +6,9 @@ describe('calculateViewport', () => {
     const zoomed = calculateViewport({ width: 20, height: 10 }, 800, 600, DEFAULT_ZOOM);
 
     expect(fitted.tileSize).toBe(40);
-    expect(zoomed.tileSize).toBe(10);
-    expect(zoomed.offsetX).toBe(300);
-    expect(zoomed.offsetY).toBe(250);
+    expect(zoomed.tileSize).toBe(40);
+    expect(zoomed.offsetX).toBe(0);
+    expect(zoomed.offsetY).toBe(100);
   });
 
   it('never shrinks tiles below one pixel', () => {

@@ -32,6 +32,19 @@ type ClusterPlan = {
   count: number;
 };
 
+const industrialClusterCenters: NormalizedPoint[] = [
+  { x: 0.12, y: 0.14 },
+  { x: 0.3, y: 0.16 },
+  { x: 0.7, y: 0.16 },
+  { x: 0.88, y: 0.14 },
+  { x: 0.14, y: 0.5 },
+  { x: 0.86, y: 0.5 },
+  { x: 0.12, y: 0.84 },
+  { x: 0.3, y: 0.82 },
+  { x: 0.7, y: 0.82 },
+  { x: 0.88, y: 0.84 },
+];
+
 const setTileType = (tiles: Tile[], x: number, y: number, type: TileType) => {
   tiles[y * STARTER_WORLD_WIDTH + x] = { ...tiles[y * STARTER_WORLD_WIDTH + x], type };
 };
@@ -39,25 +52,33 @@ const setTileType = (tiles: Tile[], x: number, y: number, type: TileType) => {
 const residentialBuildingCount = Math.ceil(STARTER_POPULATION / STARTER_RESIDENTIAL_CAPACITY);
 const commercialBuildingCount = Math.max(12, Math.ceil(STARTER_POPULATION / 14));
 const industrialBuildingCount = Math.max(16, Math.ceil(STARTER_POPULATION / 12));
+const createClusterPlans = (centers: NormalizedPoint[], totalCount: number): ClusterPlan[] => {
+  if (totalCount <= 0) {
+    return [];
+  }
+
+  const activeCenters = centers.slice(0, Math.min(totalCount, centers.length));
+  const baseCount = Math.floor(totalCount / activeCenters.length);
+  const remainder = totalCount % activeCenters.length;
+
+  return activeCenters.map((center, index) => ({
+    center,
+    count: baseCount + (index < remainder ? 1 : 0),
+  }));
+};
+
+const residentialPocketCount = Math.min(
+  residentialBuildingCount,
+  Math.max(industrialClusterCenters.length * 2, Math.round(residentialBuildingCount * 0.12)),
+);
 
 const firstNames = ['Ari', 'Bea', 'Cleo', 'Dax', 'Etta', 'Faye', 'Gus', 'Ivo', 'Juno', 'Kip', 'Lena', 'Miro'];
 const lastNames = ['Ash', 'Bell', 'Cinder', 'Dune', 'Elm', 'Flint', 'Grove', 'Hale', 'Irons', 'Jett', 'Keene', 'Lark'];
 const residentialLabels = ['Court', 'House', 'Heights', 'Terrace', 'Square', 'Row'];
 const commercialLabels = ['Market', 'Corner', 'Arcade', 'Exchange', 'Mart', 'Bazaar'];
 const industrialLabels = ['Works', 'Yard', 'Foundry', 'Depot', 'Mill', 'Plant'];
-const industrialClusterPlans: ClusterPlan[] = [
-  { center: { x: 0.14, y: 0.2 }, count: 4 },
-  { center: { x: 0.84, y: 0.2 }, count: 4 },
-  { center: { x: 0.18, y: 0.78 }, count: 4 },
-  { center: { x: 0.82, y: 0.74 }, count: industrialBuildingCount - 12 },
-];
-const residentialPocketPlans: ClusterPlan[] = [
-  { center: industrialClusterPlans[0]!.center, count: 2 },
-  { center: industrialClusterPlans[1]!.center, count: 2 },
-  { center: industrialClusterPlans[2]!.center, count: 2 },
-  { center: industrialClusterPlans[3]!.center, count: 2 },
-];
-const residentialPocketCount = residentialPocketPlans.reduce((sum, cluster) => sum + cluster.count, 0);
+const industrialClusterPlans = createClusterPlans(industrialClusterCenters, industrialBuildingCount);
+const residentialPocketPlans = createClusterPlans(industrialClusterCenters, residentialPocketCount);
 const centralResidentialCount = residentialBuildingCount - residentialPocketCount;
 
 const isRoadTile = (x: number, y: number) =>

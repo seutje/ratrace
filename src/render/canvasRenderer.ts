@@ -8,7 +8,7 @@ export type Viewport = {
   height: number;
 };
 
-export const DEFAULT_ZOOM = 0.25;
+export const DEFAULT_ZOOM = 1;
 export const MIN_ZOOM = 0.125;
 export const MAX_ZOOM = 4;
 

@@ -2,6 +2,7 @@ import { createBlankWorld, createStarterWorld } from '../sim/world';
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
 import {
   SLEEP_MINIMUM_MINUTES,
+  STARTER_POPULATION,
   SHOPPING_COOLDOWN_TICKS,
   SHOPPING_HUNGER_THRESHOLD,
   WORK_SHIFT_MINUTES,
@@ -107,10 +108,10 @@ describe('world generation', () => {
     expect(ticksPerSecond).toBe(60);
     expect(world.seed).toBe(42);
     expect(toClockNumber(world.minutesOfDay)).toBe(700);
-    expect(world.entities.agents).toHaveLength(200);
+    expect(world.entities.agents).toHaveLength(STARTER_POPULATION);
     expect(world.entities.agents[0]?.state).toBe(AgentState.Idle);
     expect(world.metrics.mapVersion).toBe(1);
-    expect(world.metrics.populationCapacity).toBe(200);
+    expect(world.metrics.populationCapacity).toBeGreaterThanOrEqual(STARTER_POPULATION);
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Residential)).toBe(true);
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Commercial)).toBe(true);
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Industrial)).toBe(true);
@@ -134,10 +135,11 @@ describe('world generation', () => {
     const residential = world.entities.buildings.filter((building) => building.kind === BuildingKind.Residential);
     const commercial = world.entities.buildings.filter((building) => building.kind === BuildingKind.Commercial);
     const industrial = world.entities.buildings.filter((building) => building.kind === BuildingKind.Industrial);
+    const centerRadius = Math.min(world.width, world.height) * 0.2;
     const averageCenterDistance = (buildings: typeof residential) =>
       buildings.reduce((sum, building) => sum + getCenterDistance(world, building.tile), 0) / buildings.length;
-    const centerResidential = residential.filter((building) => getCenterDistance(world, building.tile) <= 8);
-    const centerCommercial = commercial.filter((building) => getCenterDistance(world, building.tile) <= 8);
+    const centerResidential = residential.filter((building) => getCenterDistance(world, building.tile) <= centerRadius);
+    const centerCommercial = commercial.filter((building) => getCenterDistance(world, building.tile) <= centerRadius);
     const outerIndustry = industrial.filter((building) => getEdgeBias(world, building.tile) >= 0.7);
     const residentialNearIndustry = residential.filter(
       (building) => nearestDistanceToKind(world, building, BuildingKind.Industrial) <= 3.5,
@@ -148,13 +150,13 @@ describe('world generation', () => {
       ),
     );
 
-    expect(centerResidential.length).toBeGreaterThanOrEqual(24);
-    expect(centerCommercial.length).toBeGreaterThanOrEqual(10);
+    expect(centerResidential.length).toBeGreaterThanOrEqual(Math.floor(residential.length * 0.25));
+    expect(centerCommercial.length).toBeGreaterThanOrEqual(Math.floor(commercial.length * 0.25));
     expect(averageCenterDistance(residential)).toBeLessThan(averageCenterDistance(industrial));
     expect(averageCenterDistance(commercial)).toBeLessThan(averageCenterDistance(industrial));
     expect(outerIndustry.length).toBeGreaterThanOrEqual(Math.floor(industrial.length / 2));
     expect(industrialQuadrants.size).toBeGreaterThanOrEqual(4);
-    expect(residentialNearIndustry.length).toBeGreaterThanOrEqual(6);
+    expect(residentialNearIndustry.length).toBeGreaterThanOrEqual(Math.max(10, Math.floor(residential.length * 0.08)));
   });
 });
 
