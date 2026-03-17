@@ -40,6 +40,7 @@ import {
   WorldState,
   SimulationAdvanceResult,
 } from './types';
+import { createRuntimeAgentName } from './naming';
 import {
   clamp,
   distance,
@@ -877,7 +878,7 @@ const qualifiesForHouseholdGrowth = (agent: Agent) =>
 
 const createHouseholdGrowthAgent = (world: WorldState, home: Building, assignment: NonNullable<ReturnType<typeof pickEmploymentAssignment>>) => ({
   id: nextAgentId(world),
-  name: `Resident ${world.day}-${world.entities.agents.length + 1}`,
+  name: createRuntimeAgentName(world, home.tile, assignment.shiftStartMinute),
   pos: { x: home.tile.x + 0.5, y: home.tile.y + 0.5 },
   wallet: 18,
   carriedMeals: 0,

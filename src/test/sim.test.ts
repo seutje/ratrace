@@ -1,6 +1,7 @@
 import { createBlankWorld, createStarterWorld } from '../sim/world';
 import { COMMERCIAL_SHIFT_PROFILES, COMMERCIAL_WORKER_SHARE, INDUSTRIAL_SHIFT_PROFILES } from '../sim/employment';
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
+import { paintWorldTile } from '../sim/worldMutations';
 import {
   HOUSEHOLD_GROWTH_COST,
   SLEEP_MINIMUM_MINUTES,
@@ -16,6 +17,11 @@ import { findPath } from '../sim/pathfinding';
 import { getCongestionSpeedFactor } from '../sim/traffic';
 import { getAgentTrafficKey, getRouteTargetPoint } from '../sim/lanes';
 import { getTile, setTile, tileCenter, toClockNumber } from '../sim/utils';
+
+const residentialLabelPattern = /^(North|South|East|West|Central) (Court|House|Heights|Terrace|Square|Row) \d{2}$/;
+const commercialLabelPattern = /^(North|South|East|West|Central) (Market|Corner|Arcade|Exchange|Mart|Bazaar) \d{2}$/;
+const industrialLabelPattern = /^(North|South|East|West|Central) (Works|Yard|Foundry|Depot|Mill|Plant) \d{2}$/;
+const agentNamePattern = /^[A-Z][a-z]+ [A-Z][a-z]+$/;
 
 const stepTimes = (world: WorldState, ticks: number) => {
   let current = world;
@@ -203,6 +209,24 @@ describe('world generation', () => {
     expect(outerIndustry.length).toBeGreaterThanOrEqual(Math.floor(industrial.length / 2));
     expect(industrialQuadrants.size).toBeGreaterThanOrEqual(4);
     expect(residentialNearIndustry.length).toBeGreaterThanOrEqual(Math.max(10, Math.floor(residential.length * 0.08)));
+  });
+
+  it('gives newly painted zones starter-style labels instead of coordinate slugs', () => {
+    let world = createBlankWorld(3, 1);
+
+    world = paintWorldTile(world, 0, 0, TileType.Residential);
+    world = paintWorldTile(world, 1, 0, TileType.Commercial);
+    world = paintWorldTile(world, 2, 0, TileType.Industrial);
+
+    expect(world.entities.buildings.find((building) => building.kind === BuildingKind.Residential)?.label).toMatch(
+      residentialLabelPattern,
+    );
+    expect(world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)?.label).toMatch(
+      commercialLabelPattern,
+    );
+    expect(world.entities.buildings.find((building) => building.kind === BuildingKind.Industrial)?.label).toMatch(
+      industrialLabelPattern,
+    );
   });
 });
 
@@ -1065,6 +1089,8 @@ describe('traffic and lifecycle', () => {
     expect(next.entities.agents[1]!.wallet).toBe(0);
     expect(next.entities.agents[2]!.homeId).toBe('home');
     expect(next.entities.agents[2]!.workId).toBe('work');
+    expect(next.entities.agents[2]!.name).toMatch(agentNamePattern);
+    expect(next.entities.agents[2]!.name.startsWith('Resident ')).toBe(false);
     expect(next.entities.agents[2]!.thought).toBe('New to the household.');
   });
 

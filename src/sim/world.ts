@@ -14,6 +14,7 @@ import {
 } from './constants';
 import { createEmploymentAssignments } from './employment';
 import { createRng } from './random';
+import { createAgentName, createBuildingLabel } from './naming';
 import { AgentState, Building, BuildingKind, Point, Tile, TileType, WorldState } from './types';
 import { getTileIndex } from './utils';
 
@@ -74,11 +75,6 @@ const residentialPocketCount = Math.min(
   Math.max(industrialClusterCenters.length * 2, Math.round(residentialBuildingCount * 0.12)),
 );
 
-const firstNames = ['Ari', 'Bea', 'Cleo', 'Dax', 'Etta', 'Faye', 'Gus', 'Ivo', 'Juno', 'Kip', 'Lena', 'Miro'];
-const lastNames = ['Ash', 'Bell', 'Cinder', 'Dune', 'Elm', 'Flint', 'Grove', 'Hale', 'Irons', 'Jett', 'Keene', 'Lark'];
-const residentialLabels = ['Court', 'House', 'Heights', 'Terrace', 'Square', 'Row'];
-const commercialLabels = ['Market', 'Corner', 'Arcade', 'Exchange', 'Mart', 'Bazaar'];
-const industrialLabels = ['Works', 'Yard', 'Foundry', 'Depot', 'Mill', 'Plant'];
 const industrialClusterPlans = createClusterPlans(industrialClusterCenters, industrialBuildingCount);
 const residentialPocketPlans = createClusterPlans(industrialClusterCenters, residentialPocketCount);
 const centralResidentialCount = residentialBuildingCount - residentialPocketCount;
@@ -203,24 +199,6 @@ const pickClusterLots = (
   return selected;
 };
 
-const createBuildingLabel = (
-  seed: number,
-  rng: () => number,
-  kind: BuildingKind,
-  index: number,
-) => {
-  const district = ['North', 'South', 'East', 'West', 'Central'][(seed + index) % 5];
-  const serial = Math.floor(rng() * 90) + 10;
-
-  if (kind === BuildingKind.Residential) {
-    return `${district} ${residentialLabels[index % residentialLabels.length]} ${serial}`;
-  }
-  if (kind === BuildingKind.Commercial) {
-    return `${district} ${commercialLabels[index % commercialLabels.length]} ${serial}`;
-  }
-  return `${district} ${industrialLabels[index % industrialLabels.length]} ${serial}`;
-};
-
 const createDistrictBuildings = (
   seed: number,
   rng: () => number,
@@ -243,9 +221,6 @@ const createDistrictBuildings = (
       label: createBuildingLabel(seed, rng, kind, index),
     };
   });
-
-const createAgentName = (rng: () => number) =>
-  `${firstNames[Math.floor(rng() * firstNames.length)]} ${lastNames[Math.floor(rng() * lastNames.length)]}`;
 
 export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
   const rng = createRng(seed);

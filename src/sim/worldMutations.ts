@@ -1,5 +1,6 @@
 import { HOME_PANTRY_UNITS_PER_RESIDENT } from './constants';
 import { pickEmploymentAssignment } from './employment';
+import { createRuntimeBuildingLabel } from './naming';
 import { BuildMode, BuildingKind, TileType, WorldState } from './types';
 import { getTile, setTile } from './utils';
 
@@ -81,7 +82,7 @@ export const paintWorldTile = (sourceWorld: WorldState, x: number, y: number, mo
       capacity: buildingKind === BuildingKind.Residential ? 2 : 4,
       pantryStock: buildingKind === BuildingKind.Residential ? 2 * HOME_PANTRY_UNITS_PER_RESIDENT : 0,
       pantryCapacity: buildingKind === BuildingKind.Residential ? 2 * HOME_PANTRY_UNITS_PER_RESIDENT : 0,
-      label: `${buildingKind.toLowerCase()}-${x}-${y}`,
+      label: createRuntimeBuildingLabel(world, buildingKind, point),
     });
     setTile(world, point, {
       ...tile,
