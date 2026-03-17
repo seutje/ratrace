@@ -9,6 +9,7 @@ import {
   renderStaticWorld,
 } from '../render/canvasRenderer';
 import { useSimulationLoop } from '../render/useSimulationLoop';
+import { WorldState } from '../sim/types';
 import { BuildMenu } from '../ui/BuildMenu';
 import { Controls } from '../ui/Controls';
 import { Hud } from '../ui/Hud';
@@ -31,7 +32,8 @@ export const App = () => {
   const [size, setSize] = useState<CanvasSize>({ width: 960, height: 640 });
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
 
-  const world = useWorldStore((state) => state.world);
+  const worldWidth = useWorldStore((state) => state.world.width);
+  const worldHeight = useWorldStore((state) => state.world.height);
   const paused = useWorldStore((state) => state.paused);
   const buildMode = useWorldStore((state) => state.buildMode);
   const advanceElapsed = useWorldStore((state) => state.advanceElapsed);
@@ -65,8 +67,6 @@ export const App = () => {
     return () => observer.disconnect();
   }, []);
 
-  const worldWidth = world.width;
-  const worldHeight = world.height;
   const viewport = useMemo(
     () => calculateViewport({ width: worldWidth, height: worldHeight }, size.width, size.height, zoom),
     [size.height, size.width, worldHeight, worldWidth, zoom],
@@ -85,30 +85,42 @@ export const App = () => {
       return;
     }
 
-    const staticLayerKey = getStaticWorldCacheKey(world, viewport);
-    if (staticLayerKeyRef.current !== staticLayerKey) {
-      staticLayerKeyRef.current = staticLayerKey;
-      const layerCanvas = staticLayerRef.current ?? document.createElement('canvas');
-      layerCanvas.width = size.width;
-      layerCanvas.height = size.height;
-      const layerContext = layerCanvas.getContext('2d');
-      if (layerContext) {
-        renderStaticWorld(layerContext, world, viewport);
-        staticLayerRef.current = layerCanvas;
-      } else {
-        staticLayerRef.current = null;
+    const drawWorld = (world: WorldState) => {
+      const staticLayerKey = getStaticWorldCacheKey(world, viewport);
+      if (staticLayerKeyRef.current !== staticLayerKey) {
+        staticLayerKeyRef.current = staticLayerKey;
+        const layerCanvas = staticLayerRef.current ?? document.createElement('canvas');
+        layerCanvas.width = size.width;
+        layerCanvas.height = size.height;
+        const layerContext = layerCanvas.getContext('2d');
+        if (layerContext) {
+          renderStaticWorld(layerContext, world, viewport);
+          staticLayerRef.current = layerCanvas;
+        } else {
+          staticLayerRef.current = null;
+        }
       }
-    }
 
-    if (staticLayerRef.current && typeof context.drawImage === 'function') {
-      context.clearRect(0, 0, viewport.width, viewport.height);
-      context.drawImage(staticLayerRef.current, 0, 0);
-    } else {
-      renderStaticWorld(context, world, viewport);
-    }
+      if (staticLayerRef.current && typeof context.drawImage === 'function') {
+        context.clearRect(0, 0, viewport.width, viewport.height);
+        context.drawImage(staticLayerRef.current, 0, 0);
+      } else {
+        renderStaticWorld(context, world, viewport);
+      }
 
-    renderDynamicWorld(context, world, viewport);
-  }, [size.height, size.width, viewport, world]);
+      renderDynamicWorld(context, world, viewport);
+    };
+
+    drawWorld(useWorldStore.getState().world);
+
+    return useWorldStore.subscribe((state, previousState) => {
+      if (state.world === previousState.world) {
+        return;
+      }
+
+      drawWorld(state.world);
+    });
+  }, [size.height, size.width, viewport]);
 
   const handleCanvasClick = (event: MouseEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -122,12 +134,13 @@ export const App = () => {
         x: viewport.offsetX,
         y: viewport.offsetY,
       });
-      if (tile.x >= 0 && tile.y >= 0 && tile.x < world.width && tile.y < world.height) {
+      if (tile.x >= 0 && tile.y >= 0 && tile.x < worldWidth && tile.y < worldHeight) {
         paintTile(tile.x, tile.y, buildMode);
       }
       return;
     }
 
+    const world = useWorldStore.getState().world;
     const foundAgent = findAgentAtCanvasPoint(
       world,
       point,
@@ -140,7 +153,7 @@ export const App = () => {
   return (
     <main className="app-shell">
       <div className="background-glow" />
-      <Hud world={world} />
+      <Hud />
       <section className="content">
         <div className="canvas-frame panel">
           <div className="canvas-header">
@@ -168,7 +181,7 @@ export const App = () => {
             onZoomReset={() => setZoom(DEFAULT_ZOOM)}
           />
           <BuildMenu mode={buildMode} onChange={setBuildMode} />
-          <Inspector world={world} />
+          <Inspector />
         </aside>
       </section>
     </main>

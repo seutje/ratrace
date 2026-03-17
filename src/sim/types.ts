@@ -85,6 +85,8 @@ export type Agent = {
   paidShiftWorkMinutes: number;
   lastCompletedShiftDay: number;
   daysInCity: number;
+  maxHungerStreakDays: number;
+  keptMaxHungerToday: boolean;
 };
 
 export type TrafficMap = Record<string, number>;

@@ -357,6 +357,8 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
       paidShiftWorkMinutes: 0,
       lastCompletedShiftDay: 0,
       daysInCity: 0,
+      maxHungerStreakDays: 0,
+      keptMaxHungerToday: false,
     };
   });
 

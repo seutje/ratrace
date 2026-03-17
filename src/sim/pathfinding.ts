@@ -1,61 +1,59 @@
 import { TileType, Point, WorldState } from './types';
-import { getTile, tileKey } from './utils';
 
-const directions: Point[] = [
-  { x: 1, y: 0 },
-  { x: -1, y: 0 },
-  { x: 0, y: 1 },
-  { x: 0, y: -1 },
-];
-type QueueEntry = {
-  key: string;
+const ROAD_COST = 0.5;
+const DEFAULT_COST = 1;
+const BLOCKED_PARENT = -1;
+const UNVISITED_PARENT = -2;
+const pathCache = new WeakMap<WorldState['tiles'], Map<string, Point[] | null>>();
+
+type HeapEntry = {
+  index: number;
   score: number;
 };
 
 // Scale Manhattan distance by the cheapest possible tile cost so A* stays admissible.
-const heuristic = (start: Point, goal: Point) => 0.5 * (Math.abs(start.x - goal.x) + Math.abs(start.y - goal.y));
+const heuristic = (x: number, y: number, goalX: number, goalY: number) => ROAD_COST * (Math.abs(goalX - x) + Math.abs(goalY - y));
 
-const movementCost = (world: WorldState, point: Point) => {
-  const tile = getTile(world, point);
-  if (!tile) {
-    return Number.POSITIVE_INFINITY;
-  }
+const getTileIndex = (world: Pick<WorldState, 'width'>, x: number, y: number) => y * world.width + x;
 
-  return tile.type === TileType.Road ? 0.5 : 1;
-};
+const isInsideWorld = (world: Pick<WorldState, 'width' | 'height'>, x: number, y: number) =>
+  x >= 0 && y >= 0 && x < world.width && y < world.height;
 
-export const isTraversable = (world: WorldState, point: Point) => {
-  const tile = getTile(world, point);
-  return Boolean(tile && tile.type !== TileType.Blocked);
-};
+const isTraversableIndex = (world: Pick<WorldState, 'tiles'>, index: number) => world.tiles[index]?.type !== TileType.Blocked;
 
-const pushQueueEntry = (queue: QueueEntry[], entry: QueueEntry) => {
-  queue.push(entry);
-  let index = queue.length - 1;
+const movementCostByIndex = (world: Pick<WorldState, 'tiles'>, index: number) =>
+  world.tiles[index]?.type === TileType.Road ? ROAD_COST : DEFAULT_COST;
+
+export const isTraversable = (world: WorldState, point: Point) =>
+  isInsideWorld(world, point.x, point.y) && isTraversableIndex(world, getTileIndex(world, point.x, point.y));
+
+const pushHeapEntry = (heap: HeapEntry[], entry: HeapEntry) => {
+  heap.push(entry);
+  let index = heap.length - 1;
 
   while (index > 0) {
     const parentIndex = Math.floor((index - 1) / 2);
-    if (queue[parentIndex]!.score <= queue[index]!.score) {
+    if (heap[parentIndex]!.score <= heap[index]!.score) {
       break;
     }
 
-    [queue[parentIndex], queue[index]] = [queue[index]!, queue[parentIndex]!];
+    [heap[parentIndex], heap[index]] = [heap[index]!, heap[parentIndex]!];
     index = parentIndex;
   }
 };
 
-const popQueueEntry = (queue: QueueEntry[]) => {
-  if (queue.length === 0) {
+const popHeapEntry = (heap: HeapEntry[]) => {
+  if (heap.length === 0) {
     return undefined;
   }
 
-  const top = queue[0]!;
-  const tail = queue.pop();
-  if (queue.length === 0 || !tail) {
+  const top = heap[0]!;
+  const tail = heap.pop();
+  if (heap.length === 0 || !tail) {
     return top;
   }
 
-  queue[0] = tail;
+  heap[0] = tail;
   let index = 0;
 
   while (true) {
@@ -63,11 +61,11 @@ const popQueueEntry = (queue: QueueEntry[]) => {
     const rightIndex = leftIndex + 1;
     let smallestIndex = index;
 
-    if (leftIndex < queue.length && queue[leftIndex]!.score < queue[smallestIndex]!.score) {
+    if (leftIndex < heap.length && heap[leftIndex]!.score < heap[smallestIndex]!.score) {
       smallestIndex = leftIndex;
     }
 
-    if (rightIndex < queue.length && queue[rightIndex]!.score < queue[smallestIndex]!.score) {
+    if (rightIndex < heap.length && heap[rightIndex]!.score < heap[smallestIndex]!.score) {
       smallestIndex = rightIndex;
     }
 
@@ -75,9 +73,42 @@ const popQueueEntry = (queue: QueueEntry[]) => {
       return top;
     }
 
-    [queue[index], queue[smallestIndex]] = [queue[smallestIndex]!, queue[index]!];
+    [heap[index], heap[smallestIndex]] = [heap[smallestIndex]!, heap[index]!];
     index = smallestIndex;
   }
+};
+
+const getCacheKey = (world: Pick<WorldState, 'metrics'>, start: Point, goal: Point) =>
+  `${world.metrics.mapVersion}:${start.x},${start.y}>${goal.x},${goal.y}`;
+
+const getPathCache = (world: WorldState) => {
+  let cache = pathCache.get(world.tiles);
+  if (!cache) {
+    cache = new Map<string, Point[] | null>();
+    pathCache.set(world.tiles, cache);
+  }
+
+  return cache;
+};
+
+const reconstructPath = (
+  world: Pick<WorldState, 'width'>,
+  cameFrom: Int32Array,
+  goalIndex: number,
+) => {
+  const path: Point[] = [];
+  let currentIndex = goalIndex;
+
+  while (currentIndex >= 0) {
+    path.push({
+      x: currentIndex % world.width,
+      y: Math.floor(currentIndex / world.width),
+    });
+    currentIndex = cameFrom[currentIndex] ?? BLOCKED_PARENT;
+  }
+
+  path.reverse();
+  return path;
 };
 
 export const findPath = (world: WorldState, start: Point, goal: Point): Point[] | null => {
@@ -89,67 +120,79 @@ export const findPath = (world: WorldState, start: Point, goal: Point): Point[] 
     return [start];
   }
 
-  const startKey = tileKey(start);
-  const startScore = heuristic(start, goal);
-  const openSet = new Set([startKey]);
-  const openQueue: QueueEntry[] = [{ key: startKey, score: startScore }];
-  const cameFrom = new Map<string, Point>();
-  const gScore = new Map<string, number>([[startKey, 0]]);
-  const fScore = new Map<string, number>([[startKey, startScore]]);
-  const points = new Map<string, Point>([[startKey, start]]);
+  const cache = getPathCache(world);
+  const cacheKey = getCacheKey(world, start, goal);
+  const cached = cache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
 
-  while (openQueue.length > 0) {
-    const entry = popQueueEntry(openQueue);
-    if (!entry) {
-      break;
-    }
+  const totalTiles = world.width * world.height;
+  const startIndex = getTileIndex(world, start.x, start.y);
+  const goalIndex = getTileIndex(world, goal.x, goal.y);
+  const openHeap: HeapEntry[] = [];
+  const closed = new Uint8Array(totalTiles);
+  const gScore = new Float64Array(totalTiles);
+  const fScore = new Float64Array(totalTiles);
+  const cameFrom = new Int32Array(totalTiles);
 
-    const currentKey = entry.key;
-    const currentScore = fScore.get(currentKey);
-    if (currentScore === undefined || entry.score !== currentScore || !openSet.has(currentKey)) {
+  gScore.fill(Number.POSITIVE_INFINITY);
+  fScore.fill(Number.POSITIVE_INFINITY);
+  cameFrom.fill(UNVISITED_PARENT);
+
+  const startScore = heuristic(start.x, start.y, goal.x, goal.y);
+  gScore[startIndex] = 0;
+  fScore[startIndex] = startScore;
+  cameFrom[startIndex] = BLOCKED_PARENT;
+  pushHeapEntry(openHeap, { index: startIndex, score: startScore });
+
+  while (openHeap.length > 0) {
+    const entry = popHeapEntry(openHeap);
+    if (!entry || entry.score !== fScore[entry.index] || closed[entry.index] === 1) {
       continue;
     }
 
-    const current = points.get(currentKey);
-    if (!current) {
-      break;
-    }
-
-    if (current.x === goal.x && current.y === goal.y) {
-      const path: Point[] = [current];
-      let walkKey = currentKey;
-      while (cameFrom.has(walkKey)) {
-        const parent = cameFrom.get(walkKey)!;
-        path.unshift(parent);
-        walkKey = tileKey(parent);
-      }
+    if (entry.index === goalIndex) {
+      const path = reconstructPath(world, cameFrom, goalIndex);
+      cache.set(cacheKey, path);
       return path;
     }
 
-    openSet.delete(currentKey);
-    const baseScore = gScore.get(currentKey) ?? Number.POSITIVE_INFINITY;
+    closed[entry.index] = 1;
+    const x = entry.index % world.width;
+    const y = Math.floor(entry.index / world.width);
+    const baseScore = gScore[entry.index];
 
-    for (const direction of directions) {
-      const neighbor = { x: current.x + direction.x, y: current.y + direction.y };
-      const neighborKey = tileKey(neighbor);
-      if (!isTraversable(world, neighbor)) {
+    const neighbors = [
+      [x + 1, y],
+      [x - 1, y],
+      [x, y + 1],
+      [x, y - 1],
+    ];
+
+    for (const [neighborX, neighborY] of neighbors) {
+      if (!isInsideWorld(world, neighborX, neighborY)) {
         continue;
       }
 
-      points.set(neighborKey, neighbor);
-      const tentative = baseScore + movementCost(world, neighbor);
-      if (tentative >= (gScore.get(neighborKey) ?? Number.POSITIVE_INFINITY)) {
+      const neighborIndex = getTileIndex(world, neighborX, neighborY);
+      if (closed[neighborIndex] === 1 || !isTraversableIndex(world, neighborIndex)) {
         continue;
       }
 
-      cameFrom.set(neighborKey, current);
-      gScore.set(neighborKey, tentative);
-      const nextScore = tentative + heuristic(neighbor, goal);
-      fScore.set(neighborKey, nextScore);
-      openSet.add(neighborKey);
-      pushQueueEntry(openQueue, { key: neighborKey, score: nextScore });
+      const tentative = baseScore + movementCostByIndex(world, neighborIndex);
+      if (tentative >= gScore[neighborIndex]) {
+        continue;
+      }
+
+      cameFrom[neighborIndex] = entry.index;
+      gScore[neighborIndex] = tentative;
+      const nextScore = tentative + heuristic(neighborX, neighborY, goal.x, goal.y);
+      fScore[neighborIndex] = nextScore;
+      pushHeapEntry(openHeap, { index: neighborIndex, score: nextScore });
     }
   }
 
+  cache.set(cacheKey, null);
   return null;
 };

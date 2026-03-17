@@ -1,4 +1,5 @@
-import { AgentState, WorldState } from '../sim/types';
+import { AgentState } from '../sim/types';
+import { useWorldStore } from '../app/store';
 
 const stateColors: Record<AgentState, string> = {
   [AgentState.Idle]: '#3d4738',
@@ -11,14 +12,23 @@ const stateColors: Record<AgentState, string> = {
   [AgentState.Wandering]: '#76532d',
 };
 
-type InspectorProps = {
-  world: WorldState;
-};
+export const Inspector = () => {
+  const selectedAgentId = useWorldStore((state) => state.world.selectedAgentId);
+  const agent = useWorldStore((state) => state.world.entities.agents.find((entry) => entry.id === selectedAgentId));
+  const homeLabel = useWorldStore((state) => {
+    if (!agent) {
+      return 'None';
+    }
 
-export const Inspector = ({ world }: InspectorProps) => {
-  const agent = world.entities.agents.find((entry) => entry.id === world.selectedAgentId);
-  const home = world.entities.buildings.find((building) => building.id === agent?.homeId);
-  const work = world.entities.buildings.find((building) => building.id === agent?.workId);
+    return state.world.entities.buildings.find((building) => building.id === agent.homeId)?.label ?? 'None';
+  });
+  const workLabel = useWorldStore((state) => {
+    if (!agent) {
+      return 'None';
+    }
+
+    return state.world.entities.buildings.find((building) => building.id === agent.workId)?.label ?? 'None';
+  });
 
   return (
     <section className="panel inspector">
@@ -49,11 +59,11 @@ export const Inspector = ({ world }: InspectorProps) => {
             </div>
             <div>
               <dt>Home</dt>
-              <dd>{home?.label ?? 'None'}</dd>
+              <dd>{homeLabel}</dd>
             </div>
             <div>
               <dt>Work</dt>
-              <dd>{work?.label ?? 'None'}</dd>
+              <dd>{workLabel}</dd>
             </div>
             <div>
               <dt>Path Count</dt>

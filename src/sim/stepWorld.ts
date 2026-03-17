@@ -15,6 +15,7 @@ import {
   SLEEP_TARGET_ENERGY,
   SLEEP_ENERGY_THRESHOLD,
   SLEEP_START_MINUTE,
+  STARVATION_CULL_DAYS,
   WORK_START_MINUTE,
   WORK_SHIFT_MINUTES,
   dayMinutes,
@@ -468,6 +469,7 @@ const updateAgentStats = (agent: Agent) => {
     0,
     MAX_STAT,
   );
+  agent.keptMaxHungerToday = agent.keptMaxHungerToday && agent.stats.hunger >= MAX_STAT;
 
   if (agent.wallet <= 0 && agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD) {
     agent.thought = 'Hungry, but broke.';
@@ -656,15 +658,12 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
 
   for (const agent of world.entities.agents) {
     agent.daysInCity += 1;
+    agent.maxHungerStreakDays =
+      agent.keptMaxHungerToday && agent.stats.hunger >= MAX_STAT ? agent.maxHungerStreakDays + 1 : 0;
+    agent.keptMaxHungerToday = agent.stats.hunger >= MAX_STAT;
   }
 
-  world.entities.agents = world.entities.agents.filter(
-    (agent) =>
-      !(
-        agent.daysInCity > 4 &&
-        (agent.stats.happiness < 18 || agent.stats.hunger > 95 || agent.stats.energy < 8)
-      ),
-  );
+  world.entities.agents = world.entities.agents.filter((agent) => agent.maxHungerStreakDays < STARVATION_CULL_DAYS);
   if (world.selectedAgentId && !world.entities.agents.some((agent) => agent.id === world.selectedAgentId)) {
     world.selectedAgentId = undefined;
   }
@@ -713,6 +712,8 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
         paidShiftWorkMinutes: 0,
         lastCompletedShiftDay: 0,
         daysInCity: 0,
+        maxHungerStreakDays: 0,
+        keptMaxHungerToday: false,
       });
     }
   }

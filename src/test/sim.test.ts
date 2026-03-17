@@ -51,6 +51,8 @@ const makeTestAgent = (overrides: Partial<WorldState['entities']['agents'][numbe
   paidShiftWorkMinutes: 0,
   lastCompletedShiftDay: 0,
   daysInCity: 0,
+  maxHungerStreakDays: 0,
+  keptMaxHungerToday: false,
   ...overrides,
 });
 
@@ -686,15 +688,28 @@ describe('traffic and lifecycle', () => {
   it('spawns and removes agents without leaving dangling selection', () => {
     let world = createStarterWorld();
     world.selectedAgentId = world.entities.agents[0]!.id;
-    world.entities.agents[0]!.stats.happiness = 0;
     world.entities.agents[0]!.stats.hunger = 100;
-    world.entities.agents[0]!.daysInCity = 5;
+    world.entities.agents[0]!.maxHungerStreakDays = 1;
+    world.entities.agents[0]!.keptMaxHungerToday = true;
     world.minutesOfDay = 23 * 60 + 59;
 
     world = stepWorld(world);
 
     expect(world.selectedAgentId).toBeUndefined();
     expect(world.entities.agents.every((agent) => Number.isFinite(agent.pos.x) && Number.isFinite(agent.pos.y))).toBe(true);
+  });
+
+  it('does not cull an agent after only one full day at max hunger', () => {
+    let world = createStarterWorld();
+    const agent = world.entities.agents[0]!;
+    agent.stats.hunger = 100;
+    agent.keptMaxHungerToday = true;
+    world.minutesOfDay = 23 * 60 + 59;
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents.some((entry) => entry.id === agent.id)).toBe(true);
+    expect(world.entities.agents.find((entry) => entry.id === agent.id)?.maxHungerStreakDays).toBe(1);
   });
 
   it('remains stable over a longer deterministic soak', () => {

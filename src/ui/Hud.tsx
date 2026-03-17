@@ -1,27 +1,29 @@
 import { formatClock, toClockNumber } from '../sim/utils';
-import { WorldState } from '../sim/types';
+import { useWorldStore } from '../app/store';
 
-type HudProps = {
-  world: WorldState;
-};
+export const Hud = () => {
+  const minutesOfDay = useWorldStore((state) => state.world.minutesOfDay);
+  const population = useWorldStore((state) => state.world.entities.agents.length);
+  const populationCapacity = useWorldStore((state) => state.world.metrics.populationCapacity);
+  const treasury = useWorldStore((state) => state.world.economy.treasury);
+  const totalWealth = useWorldStore((state) => state.world.economy.totalWealth);
 
-export const Hud = ({ world }: HudProps) => {
   return (
     <header className="hud">
       <div>
         <span className="label">World Time</span>
-        <strong>{formatClock(world.minutesOfDay)}</strong>
-        <small>{toClockNumber(world.minutesOfDay)}</small>
+        <strong>{formatClock(minutesOfDay)}</strong>
+        <small>{toClockNumber(minutesOfDay)}</small>
       </div>
       <div>
         <span className="label">Population</span>
-        <strong>{world.entities.agents.length}</strong>
-        <small>cap {world.metrics.populationCapacity}</small>
+        <strong>{population}</strong>
+        <small>cap {populationCapacity}</small>
       </div>
       <div>
         <span className="label">Treasury</span>
-        <strong>${world.economy.treasury}</strong>
-        <small>wealth {world.economy.totalWealth}</small>
+        <strong>${treasury}</strong>
+        <small>wealth {totalWealth}</small>
       </div>
     </header>
   );
