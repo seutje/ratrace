@@ -158,7 +158,7 @@ export const findAgentAtCanvasPoint = (
   return world.entities.agents.find((agent) => {
     const dx = agent.pos.x - worldPoint.x;
     const dy = agent.pos.y - worldPoint.y;
-    return Math.hypot(dx, dy) <= 0.45;
+    return dx * dx + dy * dy <= 0.45 * 0.45;
   });
 };
 

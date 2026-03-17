@@ -63,6 +63,60 @@ const overlapAllowedTileTypes = new Set<TileType>([
 ]);
 const ROAD_RIGHT_OF_WAY_EPSILON = 1e-3;
 type OccupancyReservations = Map<string, number>;
+type StepBuildingIndex = {
+  byId: Map<string, Building>;
+  residential: Building[];
+  commercial: Building[];
+  industrial: Building[];
+};
+
+const cloneWorldForStep = (world: WorldState): WorldState => ({
+  ...world,
+  economy: { ...world.economy },
+  entities: {
+    agents: world.entities.agents.map((agent) => ({
+      ...agent,
+      pos: { ...agent.pos },
+      stats: { ...agent.stats },
+      route: agent.route.slice(),
+      destination: agent.destination ? { ...agent.destination } : undefined,
+    })),
+    buildings: world.entities.buildings.map((building) => ({
+      ...building,
+    })),
+  },
+  traffic: {},
+  metrics: { ...world.metrics },
+});
+
+const createBuildingIndex = (world: WorldState): StepBuildingIndex => {
+  const byId = new Map<string, Building>();
+  const residential: Building[] = [];
+  const commercial: Building[] = [];
+  const industrial: Building[] = [];
+
+  for (const building of world.entities.buildings) {
+    byId.set(building.id, building);
+    switch (building.kind) {
+      case BuildingKind.Residential:
+        residential.push(building);
+        break;
+      case BuildingKind.Commercial:
+        commercial.push(building);
+        break;
+      case BuildingKind.Industrial:
+        industrial.push(building);
+        break;
+    }
+  }
+
+  return {
+    byId,
+    residential,
+    commercial,
+    industrial,
+  };
+};
 
 const allowsAgentOverlap = (tileType: TileType) => overlapAllowedTileTypes.has(tileType);
 
@@ -91,15 +145,15 @@ const removeReservation = (reservations: OccupancyReservations, key?: string) =>
 const createOccupancyReservations = (world: WorldState) => {
   const reservations: OccupancyReservations = new Map();
 
-  world.entities.agents.forEach((agent) => {
+  for (const agent of world.entities.agents) {
     const currentTile = getAgentCurrentTile(agent);
     const currentTileType = getTile(world, currentTile)?.type ?? TileType.Empty;
     if (allowsAgentOverlap(currentTileType)) {
-      return;
+      continue;
     }
 
     addReservation(reservations, getAgentTrafficKey(world, agent, currentTile, currentTileType));
-  });
+  }
 
   return reservations;
 };
@@ -142,29 +196,50 @@ const getRequiredSleepTicks = (agent: Agent) => {
   return Math.max(minimumSleepTicks, energyRecoveryTicks);
 };
 
-const getBuilding = (world: WorldState, buildingId: string) =>
-  world.entities.buildings.find((building) => building.id === buildingId);
+const getBuilding = (buildingIndex: StepBuildingIndex, buildingId: string) => buildingIndex.byId.get(buildingId);
 
-const getBuildingsByKind = (world: WorldState, kind: BuildingKind) =>
-  world.entities.buildings.filter((building) => building.kind === kind);
+const getBuildingsByKind = (buildingIndex: StepBuildingIndex, kind: BuildingKind) => {
+  switch (kind) {
+    case BuildingKind.Residential:
+      return buildingIndex.residential;
+    case BuildingKind.Commercial:
+      return buildingIndex.commercial;
+    case BuildingKind.Industrial:
+      return buildingIndex.industrial;
+  }
+};
 
 const computeTraffic = (world: WorldState) => {
   const traffic: Record<string, number> = {};
+  let trafficPeak = 0;
 
-  world.entities.agents.forEach((agent) => {
+  for (const agent of world.entities.agents) {
     const currentTile = getAgentCurrentTile(agent);
     const currentTileType = getTile(world, currentTile)?.type ?? TileType.Empty;
     const key = getAgentTrafficKey(world, agent, currentTile, currentTileType);
-    traffic[key] = (traffic[key] ?? 0) + 1;
-  });
+    const occupancy = (traffic[key] ?? 0) + 1;
+    traffic[key] = occupancy;
+    if (occupancy > trafficPeak) {
+      trafficPeak = occupancy;
+    }
+  }
 
   world.traffic = traffic;
-  world.metrics.trafficPeak = Math.max(0, ...Object.values(traffic));
+  world.metrics.trafficPeak = trafficPeak;
 };
 
 const updateEconomyTotals = (world: WorldState) => {
-  const walletTotal = world.entities.agents.reduce((sum, agent) => sum + agent.wallet, 0);
-  const stockTotal = world.entities.buildings.reduce((sum, building) => sum + building.stock, 0);
+  let walletTotal = 0;
+  let stockTotal = 0;
+
+  for (const agent of world.entities.agents) {
+    walletTotal += agent.wallet;
+  }
+
+  for (const building of world.entities.buildings) {
+    stockTotal += building.stock;
+  }
+
   world.economy.supplyStock = stockTotal;
   world.economy.totalWealth = world.economy.treasury + walletTotal + stockTotal * 2;
 };
@@ -399,16 +474,28 @@ const updateAgentStats = (agent: Agent) => {
   }
 };
 
-const nearestBuilding = (world: WorldState, from: Point, kind: BuildingKind, predicate?: (building: Building) => boolean) => {
-  const candidates = getBuildingsByKind(world, kind).filter((building) => (predicate ? predicate(building) : true));
-  return candidates
-    .slice()
-    .sort(
-      (left, right) =>
-        Math.abs(left.tile.x - from.x) +
-          Math.abs(left.tile.y - from.y) -
-          (Math.abs(right.tile.x - from.x) + Math.abs(right.tile.y - from.y)),
-    )[0];
+const nearestBuilding = (
+  buildingIndex: StepBuildingIndex,
+  from: Point,
+  kind: BuildingKind,
+  predicate?: (building: Building) => boolean,
+) => {
+  let nearest: Building | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (const building of getBuildingsByKind(buildingIndex, kind)) {
+    if (predicate && !predicate(building)) {
+      continue;
+    }
+
+    const distance = Math.abs(building.tile.x - from.x) + Math.abs(building.tile.y - from.y);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      nearest = building;
+    }
+  }
+
+  return nearest;
 };
 
 const isOnBuildingTile = (agent: Agent, building?: Building) => {
@@ -420,9 +507,9 @@ const isOnBuildingTile = (agent: Agent, building?: Building) => {
   return tile.x === building.tile.x && tile.y === building.tile.y;
 };
 
-const determineDestination = (world: WorldState, agent: Agent): AgentDestination | undefined => {
-  const home = getBuilding(world, agent.homeId);
-  const work = getBuilding(world, agent.workId);
+const determineDestination = (world: WorldState, buildingIndex: StepBuildingIndex, agent: Agent): AgentDestination | undefined => {
+  const home = getBuilding(buildingIndex, agent.homeId);
+  const work = getBuilding(buildingIndex, agent.workId);
   const tile = getAgentCurrentTile(agent);
   const shoppingCooldownElapsed =
     agent.lastShoppedTick === undefined || world.tick - agent.lastShoppedTick >= SHOPPING_COOLDOWN_TICKS;
@@ -445,7 +532,7 @@ const determineDestination = (world: WorldState, agent: Agent): AgentDestination
   }
 
   if (agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && agent.wallet >= SHOP_PRICE && shoppingCooldownElapsed) {
-    const shop = nearestBuilding(world, tile, BuildingKind.Commercial, (building) => building.stock > 0);
+    const shop = nearestBuilding(buildingIndex, tile, BuildingKind.Commercial, (building) => building.stock > 0);
     if (shop) {
       return { buildingId: shop.id, kind: 'shop' };
     }
@@ -485,9 +572,14 @@ const applyDestinationState = (agent: Agent, destination?: AgentDestination) => 
   }
 };
 
-const routeAgent = (world: WorldState, agent: Agent, reservations: OccupancyReservations) => {
+const routeAgent = (
+  world: WorldState,
+  buildingIndex: StepBuildingIndex,
+  agent: Agent,
+  reservations: OccupancyReservations,
+) => {
   activateShiftIfDue(world, agent);
-  const destination = determineDestination(world, agent);
+  const destination = determineDestination(world, buildingIndex, agent);
   if (!destination) {
     agent.destination = undefined;
     agent.route = [];
@@ -500,7 +592,7 @@ const routeAgent = (world: WorldState, agent: Agent, reservations: OccupancyRese
     agent.thought = 'Hungry, but broke.';
   }
 
-  const building = getBuilding(world, destination.buildingId);
+  const building = getBuilding(buildingIndex, destination.buildingId);
   if (!building) {
     return;
   }
@@ -524,38 +616,47 @@ const routeAgent = (world: WorldState, agent: Agent, reservations: OccupancyRese
   }
 };
 
-const restockCommercialBuildings = (world: WorldState) => {
+const restockCommercialBuildings = (world: WorldState, buildingIndex: StepBuildingIndex) => {
   if (world.minutesOfDay % 60 !== 0) {
     return;
   }
 
-  const industries = getBuildingsByKind(world, BuildingKind.Industrial);
-  const shops = getBuildingsByKind(world, BuildingKind.Commercial);
+  const industries = getBuildingsByKind(buildingIndex, BuildingKind.Industrial);
+  const shops = getBuildingsByKind(buildingIndex, BuildingKind.Commercial);
+  let industryIndex = 0;
+
   for (const shop of shops) {
     let needed = Math.max(0, shop.capacity - shop.stock);
-    while (needed > 0) {
-      const source = industries.find((building) => building.stock > 0);
-      if (!source) {
-        break;
+
+    while (needed > 0 && industryIndex < industries.length) {
+      const source = industries[industryIndex]!;
+      if (source.stock <= 0) {
+        industryIndex += 1;
+        continue;
       }
+
       const transfer = Math.min(COMMERCIAL_RESTOCK_PER_HOUR, needed, source.stock);
       source.stock -= transfer;
       shop.stock += transfer;
       needed -= transfer;
+
+      if (source.stock <= 0) {
+        industryIndex += 1;
+      }
     }
   }
 };
 
 const nextAgentId = (world: WorldState) => `agent-${world.entities.agents.length + world.day + 1}`;
 
-const runPopulationTurnover = (world: WorldState) => {
+const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingIndex) => {
   if (world.minutesOfDay !== 0) {
     return;
   }
 
-  world.entities.agents.forEach((agent) => {
+  for (const agent of world.entities.agents) {
     agent.daysInCity += 1;
-  });
+  }
 
   world.entities.agents = world.entities.agents.filter(
     (agent) =>
@@ -568,18 +669,27 @@ const runPopulationTurnover = (world: WorldState) => {
     world.selectedAgentId = undefined;
   }
 
-  const homes = getBuildingsByKind(world, BuildingKind.Residential);
-  const capacity = homes.reduce((sum, home) => sum + home.capacity, 0);
+  const homes = getBuildingsByKind(buildingIndex, BuildingKind.Residential);
+  let capacity = 0;
+  for (const home of homes) {
+    capacity += home.capacity;
+  }
   const freeSlots = capacity - world.entities.agents.length;
 
   if (freeSlots > 0 && world.day % 2 === 0) {
     const occupied = new Map<string, number>();
-    world.entities.agents.forEach((agent) => {
+    for (const agent of world.entities.agents) {
       occupied.set(agent.homeId, (occupied.get(agent.homeId) ?? 0) + 1);
-    });
+    }
 
     const home = homes.find((building) => (occupied.get(building.id) ?? 0) < building.capacity);
-    const work = getBuildingsByKind(world, BuildingKind.Industrial).sort((left, right) => left.stock - right.stock)[0];
+    let work: Building | undefined;
+    for (const workplace of getBuildingsByKind(buildingIndex, BuildingKind.Industrial)) {
+      if (!work || workplace.stock < work.stock) {
+        work = workplace;
+      }
+    }
+
     if (home && work) {
       world.entities.agents.push({
         id: nextAgentId(world),
@@ -611,7 +721,8 @@ const runPopulationTurnover = (world: WorldState) => {
 };
 
 export const stepWorld = (inputWorld: WorldState): WorldState => {
-  const world = structuredClone(inputWorld) as WorldState;
+  const world = cloneWorldForStep(inputWorld);
+  const buildingIndex = createBuildingIndex(world);
   world.tick += 1;
   world.minutesOfDay += gameMinutesPerTick;
 
@@ -621,13 +732,13 @@ export const stepWorld = (inputWorld: WorldState): WorldState => {
   }
 
   computeTraffic(world);
-  restockCommercialBuildings(world);
+  restockCommercialBuildings(world, buildingIndex);
   const reservations = createOccupancyReservations(world);
-  world.entities.agents.forEach((agent) => {
+  for (const agent of world.entities.agents) {
     updateAgentStats(agent);
-    routeAgent(world, agent, reservations);
-  });
-  runPopulationTurnover(world);
+    routeAgent(world, buildingIndex, agent, reservations);
+  }
+  runPopulationTurnover(world, buildingIndex);
   updateEconomyTotals(world);
 
   return world;

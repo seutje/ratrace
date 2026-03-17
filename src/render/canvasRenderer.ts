@@ -57,7 +57,20 @@ export const tileToPixel = (x: number, y: number, viewport: Viewport) => ({
   y: viewport.offsetY + y * viewport.tileSize,
 });
 
-export const renderWorld = (ctx: CanvasRenderingContext2D, world: WorldState, viewport: Viewport) => {
+export const getStaticWorldCacheKey = (
+  world: Pick<WorldState, 'metrics'>,
+  viewport: Pick<Viewport, 'width' | 'height' | 'tileSize' | 'offsetX' | 'offsetY'>,
+) =>
+  [
+    world.metrics.mapVersion,
+    viewport.width,
+    viewport.height,
+    viewport.tileSize,
+    viewport.offsetX,
+    viewport.offsetY,
+  ].join(':');
+
+export const renderStaticWorld = (ctx: CanvasRenderingContext2D, world: WorldState, viewport: Viewport) => {
   ctx.clearRect(0, 0, viewport.width, viewport.height);
 
   const sky = ctx.createLinearGradient(0, 0, 0, viewport.height);
@@ -84,6 +97,10 @@ export const renderWorld = (ctx: CanvasRenderingContext2D, world: WorldState, vi
       viewport.tileSize * 0.7,
     );
   }
+};
+
+export const renderDynamicWorld = (ctx: CanvasRenderingContext2D, world: WorldState, viewport: Viewport) => {
+  ctx.lineWidth = 1;
 
   for (const agent of world.entities.agents) {
     const x = viewport.offsetX + agent.pos.x * viewport.tileSize;

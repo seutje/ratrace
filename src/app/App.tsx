@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { renderWorld, calculateViewport, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM } from '../render/canvasRenderer';
+import {
+  calculateViewport,
+  DEFAULT_ZOOM,
+  getStaticWorldCacheKey,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  renderDynamicWorld,
+  renderStaticWorld,
+} from '../render/canvasRenderer';
 import { useSimulationLoop } from '../render/useSimulationLoop';
 import { BuildMenu } from '../ui/BuildMenu';
 import { Controls } from '../ui/Controls';
@@ -18,6 +26,8 @@ const zoomOut = (zoom: number) => Math.max(MIN_ZOOM, zoom / 2);
 export const App = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const staticLayerRef = useRef<HTMLCanvasElement | null>(null);
+  const staticLayerKeyRef = useRef('');
   const [size, setSize] = useState<CanvasSize>({ width: 960, height: 640 });
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
 
@@ -75,7 +85,29 @@ export const App = () => {
       return;
     }
 
-    renderWorld(context, world, viewport);
+    const staticLayerKey = getStaticWorldCacheKey(world, viewport);
+    if (staticLayerKeyRef.current !== staticLayerKey) {
+      staticLayerKeyRef.current = staticLayerKey;
+      const layerCanvas = staticLayerRef.current ?? document.createElement('canvas');
+      layerCanvas.width = size.width;
+      layerCanvas.height = size.height;
+      const layerContext = layerCanvas.getContext('2d');
+      if (layerContext) {
+        renderStaticWorld(layerContext, world, viewport);
+        staticLayerRef.current = layerCanvas;
+      } else {
+        staticLayerRef.current = null;
+      }
+    }
+
+    if (staticLayerRef.current && typeof context.drawImage === 'function') {
+      context.clearRect(0, 0, viewport.width, viewport.height);
+      context.drawImage(staticLayerRef.current, 0, 0);
+    } else {
+      renderStaticWorld(context, world, viewport);
+    }
+
+    renderDynamicWorld(context, world, viewport);
   }, [size.height, size.width, viewport, world]);
 
   const handleCanvasClick = (event: MouseEvent<HTMLCanvasElement>) => {
