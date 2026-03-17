@@ -49,6 +49,8 @@ export type Building = {
   tile: Point;
   stock: number;
   capacity: number;
+  pantryStock: number;
+  pantryCapacity: number;
   label: string;
 };
 

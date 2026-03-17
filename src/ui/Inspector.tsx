@@ -15,6 +15,13 @@ const stateColors: Record<AgentState, string> = {
 export const Inspector = () => {
   const selectedAgentId = useWorldStore((state) => state.world.selectedAgentId);
   const agent = useWorldStore((state) => state.world.entities.agents.find((entry) => entry.id === selectedAgentId));
+  const home = useWorldStore((state) => {
+    if (!agent) {
+      return undefined;
+    }
+
+    return state.world.entities.buildings.find((building) => building.id === agent.homeId);
+  });
   const homeLabel = useWorldStore((state) => {
     if (!agent) {
       return 'None';
@@ -64,6 +71,10 @@ export const Inspector = () => {
             <div>
               <dt>Work</dt>
               <dd>{workLabel}</dd>
+            </div>
+            <div>
+              <dt>Pantry</dt>
+              <dd>{home ? `${home.pantryStock}/${home.pantryCapacity}` : 'None'}</dd>
             </div>
             <div>
               <dt>Path Count</dt>

@@ -3,6 +3,7 @@ import { advanceWorld, stepWorld } from '../sim/stepWorld';
 import {
   SLEEP_MINIMUM_MINUTES,
   STARTER_POPULATION,
+  SHOPPING_BASKET_UNITS,
   SHOPPING_COOLDOWN_TICKS,
   SHOPPING_HUNGER_THRESHOLD,
   WORK_SHIFT_MINUTES,
@@ -117,6 +118,7 @@ describe('world generation', () => {
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Residential)).toBe(true);
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Commercial)).toBe(true);
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Industrial)).toBe(true);
+    expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Residential && building.pantryCapacity > 0)).toBe(true);
   });
 
   it('connects all starter buildings to one shared road network', () => {
@@ -346,7 +348,7 @@ describe('pathfinding', () => {
 });
 
 describe('economy', () => {
-  it('pays wages during work and deducts wallet during shopping', () => {
+  it('pays wages during work and restocks the home pantry during shopping', () => {
     let world = createStarterWorld();
     const agent = world.entities.agents[0]!;
     agent.pos = tileCenter(world.entities.buildings.find((building) => building.id === agent.workId)!.tile);
@@ -363,20 +365,31 @@ describe('economy', () => {
     afterWork.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
     afterWork.lastCompletedShiftDay = world.day;
     const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
+    const home = world.entities.buildings.find((building) => building.id === afterWork.homeId)!;
+    home.pantryStock = 0;
     afterWork.pos = tileCenter(shop.tile);
     afterWork.stats.hunger = 90;
     world.minutesOfDay = 18 * 60;
+    const walletBeforeShopping = afterWork.wallet;
+    const shopStockBefore = shop.stock;
 
     world = stepWorld(world);
     expect(world.entities.agents[0]!.wallet).toBeLessThan(afterWork.wallet);
+    expect(world.entities.agents[0]!.wallet).toBe(walletBeforeShopping - 8);
+    expect(world.entities.buildings.find((building) => building.id === home.id)!.pantryStock).toBeGreaterThan(0);
+    expect(world.entities.buildings.find((building) => building.id === shop.id)!.stock).toBe(
+      shopStockBefore - Math.min(SHOPPING_BASKET_UNITS, shopStockBefore),
+    );
   });
 
   it('prevents shopping when wallet is zero', () => {
     let world = createStarterWorld();
     const agent = world.entities.agents[0]!;
     const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
+    const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
     agent.wallet = 0;
     agent.stats.hunger = 100;
+    home.pantryStock = 0;
     agent.shiftDay = world.day;
     agent.shiftWorkMinutes = WORK_SHIFT_MINUTES;
     agent.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
@@ -387,7 +400,37 @@ describe('economy', () => {
     world = stepWorld(world);
 
     expect(world.entities.buildings.find((building) => building.id === shop.id)!.stock).toBe(shop.stock);
+    expect(world.entities.buildings.find((building) => building.id === home.id)!.pantryStock).toBe(0);
     expect(world.entities.agents[0]!.thought).toContain('broke');
+  });
+
+  it('consumes pantry food at home after a shopping trip', () => {
+    let world = createStarterWorld();
+    const agent = world.entities.agents[0]!;
+    const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
+    const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
+
+    agent.wallet = 100;
+    agent.stats.hunger = 100;
+    home.pantryStock = 0;
+    agent.shiftDay = world.day;
+    agent.shiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.lastCompletedShiftDay = world.day;
+    agent.pos = tileCenter(shop.tile);
+    world.minutesOfDay = 18 * 60;
+
+    world = stepWorld(world);
+    expect(world.entities.agents[0]!.lastShoppedTick).toBe(world.tick);
+    expect(world.entities.buildings.find((building) => building.id === home.id)!.pantryStock).toBeGreaterThan(0);
+
+    world.entities.agents[0]!.pos = tileCenter(home.tile);
+    world = stepWorld(world);
+
+    expect(world.entities.agents[0]!.stats.hunger).toBeLessThan(SHOPPING_HUNGER_THRESHOLD);
+    expect(world.entities.buildings.find((building) => building.id === home.id)!.pantryStock).toBeLessThan(
+      Math.min(SHOPPING_BASKET_UNITS, home.pantryCapacity),
+    );
   });
 
   it('does not immediately pick another shopping trip after a purchase', () => {
@@ -398,6 +441,7 @@ describe('economy', () => {
 
     agent.wallet = 100;
     agent.stats.hunger = 100;
+    home.pantryStock = 0;
     agent.shiftDay = world.day;
     agent.shiftWorkMinutes = WORK_SHIFT_MINUTES;
     agent.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
@@ -407,7 +451,6 @@ describe('economy', () => {
 
     world = stepWorld(world);
     expect(world.entities.agents[0]!.lastShoppedTick).toBe(world.tick);
-    expect(world.entities.agents[0]!.stats.hunger).toBeLessThan(SHOPPING_HUNGER_THRESHOLD);
 
     world.entities.agents[0]!.pos = tileCenter(home.tile);
     world = stepWorld(world);
@@ -423,10 +466,12 @@ describe('economy', () => {
     let world = createStarterWorld();
     const agent = world.entities.agents[0]!;
     const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
+    const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
 
     agent.wallet = 100;
     agent.stats.hunger = 100;
     agent.stats.energy = 80;
+    home.pantryStock = 0;
     agent.shiftDay = world.day;
     agent.shiftWorkMinutes = WORK_SHIFT_MINUTES;
     agent.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
@@ -443,6 +488,28 @@ describe('economy', () => {
     }
 
     expect(purchases).toBe(1);
+  });
+
+  it('shops from home to refill the pantry before hunger becomes urgent', () => {
+    let world = createStarterWorld();
+    const agent = world.entities.agents[0]!;
+    const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
+
+    agent.pos = tileCenter(home.tile);
+    agent.wallet = 100;
+    agent.stats.hunger = 20;
+    agent.stats.energy = 80;
+    agent.shiftDay = world.day;
+    agent.shiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.lastCompletedShiftDay = world.day;
+    home.pantryStock = 1;
+    world.minutesOfDay = 18 * 60;
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents[0]!.destination?.kind).toBe('shop');
+    expect(world.entities.agents[0]!.state).toBe(AgentState.MovingToShop);
   });
 
   it('does not force a home destination when already home and no need is active', () => {
@@ -476,6 +543,8 @@ describe('traffic and lifecycle', () => {
       tile: { x: 0, y: 0 },
       stock: 0,
       capacity: 3,
+      pantryStock: 3,
+      pantryCapacity: 6,
       label: 'home',
     });
     world.entities.agents.push(
@@ -579,8 +648,26 @@ describe('traffic and lifecycle', () => {
     setTile(world, { x: 4, y: 1 }, { x: 4, y: 1, type: TileType.Industrial, buildingId: 'work' });
 
     world.entities.buildings.push(
-      { id: 'home', kind: BuildingKind.Residential, tile: { x: 0, y: 1 }, stock: 0, capacity: 1, label: 'home' },
-      { id: 'work', kind: BuildingKind.Industrial, tile: { x: 4, y: 1 }, stock: 4, capacity: 1, label: 'work' },
+      {
+        id: 'home',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 1 },
+        stock: 0,
+        capacity: 1,
+        pantryStock: 1,
+        pantryCapacity: 2,
+        label: 'home',
+      },
+      {
+        id: 'work',
+        kind: BuildingKind.Industrial,
+        tile: { x: 4, y: 1 },
+        stock: 4,
+        capacity: 1,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'work',
+      },
     );
     world.entities.agents.push(
       makeTestAgent({
@@ -616,8 +703,26 @@ describe('traffic and lifecycle', () => {
     setTile(world, { x: 4, y: 1 }, { x: 4, y: 1, type: TileType.Industrial, buildingId: 'work' });
 
     world.entities.buildings.push(
-      { id: 'home', kind: BuildingKind.Residential, tile: { x: 0, y: 1 }, stock: 0, capacity: 2, label: 'home' },
-      { id: 'work', kind: BuildingKind.Industrial, tile: { x: 4, y: 1 }, stock: 4, capacity: 2, label: 'work' },
+      {
+        id: 'home',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 1 },
+        stock: 0,
+        capacity: 2,
+        pantryStock: 2,
+        pantryCapacity: 4,
+        label: 'home',
+      },
+      {
+        id: 'work',
+        kind: BuildingKind.Industrial,
+        tile: { x: 4, y: 1 },
+        stock: 4,
+        capacity: 2,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'work',
+      },
     );
 
     world.entities.agents.push(
@@ -691,6 +796,7 @@ describe('traffic and lifecycle', () => {
     world.entities.agents[0]!.stats.hunger = 100;
     world.entities.agents[0]!.maxHungerStreakDays = 1;
     world.entities.agents[0]!.keptMaxHungerToday = true;
+    world.entities.buildings.find((building) => building.id === world.entities.agents[0]!.homeId)!.pantryStock = 0;
     world.minutesOfDay = 23 * 60 + 59;
 
     world = stepWorld(world);
@@ -704,6 +810,7 @@ describe('traffic and lifecycle', () => {
     const agent = world.entities.agents[0]!;
     agent.stats.hunger = 100;
     agent.keptMaxHungerToday = true;
+    world.entities.buildings.find((building) => building.id === agent.homeId)!.pantryStock = 0;
     world.minutesOfDay = 23 * 60 + 59;
 
     world = stepWorld(world);

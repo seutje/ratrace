@@ -2,11 +2,12 @@ import {
   BASE_MOVE_SPEED,
   COMMERCIAL_RESTOCK_PER_HOUR,
   HOURLY_WAGE,
+  PANTRY_MEAL_HUNGER_RECOVERY,
   INDUSTRIAL_OUTPUT_PER_HOUR,
   MAX_STAT,
   ROAD_SPEED_MULTIPLIER,
   SHOPPING_COOLDOWN_TICKS,
-  SHOPPING_HUNGER_RECOVERY,
+  SHOPPING_BASKET_UNITS,
   SHOPPING_HUNGER_THRESHOLD,
   SHOP_PRICE,
   SLEEP_END_MINUTE,
@@ -198,6 +199,9 @@ const getRequiredSleepTicks = (agent: Agent) => {
 };
 
 const getBuilding = (buildingIndex: StepBuildingIndex, buildingId: string) => buildingIndex.byId.get(buildingId);
+const getHomePantryReorderPoint = (home: Building) => Math.max(1, Math.floor(home.pantryCapacity / 3));
+const homeNeedsPantryRefill = (home?: Building) =>
+  !!home && home.pantryStock < home.pantryCapacity && home.pantryStock <= getHomePantryReorderPoint(home);
 
 const getBuildingsByKind = (buildingIndex: StepBuildingIndex, kind: BuildingKind) => {
   switch (kind) {
@@ -232,6 +236,7 @@ const computeTraffic = (world: WorldState) => {
 const updateEconomyTotals = (world: WorldState) => {
   let walletTotal = 0;
   let stockTotal = 0;
+  let pantryTotal = 0;
 
   for (const agent of world.entities.agents) {
     walletTotal += agent.wallet;
@@ -239,10 +244,11 @@ const updateEconomyTotals = (world: WorldState) => {
 
   for (const building of world.entities.buildings) {
     stockTotal += building.stock;
+    pantryTotal += building.pantryStock;
   }
 
-  world.economy.supplyStock = stockTotal;
-  world.economy.totalWealth = world.economy.treasury + walletTotal + stockTotal * 2;
+  world.economy.supplyStock = stockTotal + pantryTotal;
+  world.economy.totalWealth = world.economy.treasury + walletTotal + (stockTotal + pantryTotal) * 2;
 };
 
 const assignRoute = (world: WorldState, agent: Agent, destination: AgentDestination, targetPoint: Point) => {
@@ -408,9 +414,25 @@ const recordShiftWork = (agent: Agent, building: Building, world: WorldState) =>
   }
 };
 
-const arriveAtBuilding = (agent: Agent, building: Building, world: WorldState) => {
+const consumePantryMeal = (agent: Agent, home: Building) => {
+  if (home.pantryStock <= 0 || agent.stats.hunger < SHOPPING_HUNGER_THRESHOLD) {
+    return false;
+  }
+
+  home.pantryStock -= 1;
+  agent.stats.hunger = clamp(agent.stats.hunger - PANTRY_MEAL_HUNGER_RECOVERY, 0, MAX_STAT);
+  agent.stats.happiness = clamp(agent.stats.happiness + 6, 0, MAX_STAT);
+  agent.thought = 'Ate from the pantry.';
+  return true;
+};
+
+const arriveAtBuilding = (agent: Agent, building: Building, buildingIndex: StepBuildingIndex, world: WorldState) => {
   switch (building.kind) {
     case BuildingKind.Residential: {
+      if (agent.state !== AgentState.Sleeping) {
+        consumePantryMeal(agent, building);
+      }
+
       const committedToSleep = isCommittedToSleep(agent, world);
       const shouldContinueSleeping =
         agent.state === AgentState.Sleeping && (committedToSleep || isSleepHours(world.minutesOfDay));
@@ -433,23 +455,32 @@ const arriveAtBuilding = (agent: Agent, building: Building, world: WorldState) =
     case BuildingKind.Industrial:
       recordShiftWork(agent, building, world);
       break;
-    case BuildingKind.Commercial:
+    case BuildingKind.Commercial: {
+      const home = getBuilding(buildingIndex, agent.homeId);
+      const pantryGap = home ? Math.max(0, home.pantryCapacity - home.pantryStock) : 0;
       if (
-        agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD &&
+        home &&
+        pantryGap > 0 &&
         agent.wallet >= SHOP_PRICE &&
         building.stock > 0 &&
         agent.lastShoppedTick !== world.tick
       ) {
+        const transferredUnits = Math.min(SHOPPING_BASKET_UNITS, pantryGap, building.stock);
+        if (transferredUnits <= 0) {
+          break;
+        }
+
         agent.state = AgentState.Shopping;
         agent.wallet -= SHOP_PRICE;
-        building.stock -= 1;
+        building.stock -= transferredUnits;
+        home.pantryStock += transferredUnits;
         world.economy.treasury += 2;
-        agent.stats.hunger = clamp(agent.stats.hunger - SHOPPING_HUNGER_RECOVERY, 0, MAX_STAT);
         agent.stats.happiness = clamp(agent.stats.happiness + 8, 0, MAX_STAT);
         agent.lastShoppedTick = world.tick;
-        agent.thought = 'Groceries secured.';
+        agent.thought = 'Pantry restocked.';
       }
       break;
+    }
   }
 };
 
@@ -533,7 +564,9 @@ const determineDestination = (world: WorldState, buildingIndex: StepBuildingInde
     return { buildingId: work.id, kind: 'work' };
   }
 
-  if (agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && agent.wallet >= SHOP_PRICE && shoppingCooldownElapsed) {
+  const emergencyFoodRun = agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && (home?.pantryStock ?? 0) <= 0;
+  const pantryRunFromHome = home && isOnBuildingTile(agent, home) && homeNeedsPantryRefill(home);
+  if ((emergencyFoodRun || pantryRunFromHome) && agent.wallet >= SHOP_PRICE && shoppingCooldownElapsed) {
     const shop = nearestBuilding(buildingIndex, tile, BuildingKind.Commercial, (building) => building.stock > 0);
     if (shop) {
       return { buildingId: shop.id, kind: 'shop' };
@@ -581,8 +614,12 @@ const routeAgent = (
   reservations: OccupancyReservations,
 ) => {
   activateShiftIfDue(world, agent);
+  const home = getBuilding(buildingIndex, agent.homeId);
   const destination = determineDestination(world, buildingIndex, agent);
   if (!destination) {
+    if (home && isOnBuildingTile(agent, home) && agent.state !== AgentState.Sleeping) {
+      consumePantryMeal(agent, home);
+    }
     agent.destination = undefined;
     agent.route = [];
     agent.routeIndex = 0;
@@ -590,7 +627,7 @@ const routeAgent = (
     return;
   }
 
-  if (agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && agent.wallet < SHOP_PRICE) {
+  if (agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && (home?.pantryStock ?? 0) <= 0 && agent.wallet < SHOP_PRICE) {
     agent.thought = 'Hungry, but broke.';
   }
 
@@ -604,7 +641,7 @@ const routeAgent = (
     agent.destination = destination;
     agent.route = [];
     agent.routeIndex = 0;
-    arriveAtBuilding(agent, building, world);
+    arriveAtBuilding(agent, building, buildingIndex, world);
     return;
   }
 
@@ -614,7 +651,7 @@ const routeAgent = (
 
   const arrivedTile = getAgentCurrentTile(agent);
   if (arrivedTile.x === building.tile.x && arrivedTile.y === building.tile.y) {
-    arriveAtBuilding(agent, building, world);
+    arriveAtBuilding(agent, building, buildingIndex, world);
   }
 };
 

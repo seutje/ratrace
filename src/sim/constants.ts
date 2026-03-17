@@ -27,10 +27,12 @@ export const STARTER_INDUSTRIAL_CAPACITY = 20;
 
 export const MAX_STAT = 100;
 export const SHOPPING_HUNGER_THRESHOLD = 60;
-export const SHOPPING_HUNGER_RECOVERY = 100;
 export const SHOPPING_COOLDOWN_TICKS = 180;
 export const SLEEP_ENERGY_THRESHOLD = 20;
 export const SHOP_PRICE = 8;
+export const SHOPPING_BASKET_UNITS = 4;
+export const PANTRY_MEAL_HUNGER_RECOVERY = 100;
+export const HOME_PANTRY_UNITS_PER_RESIDENT = 2;
 export const HOURLY_WAGE = 12;
 export const INDUSTRIAL_OUTPUT_PER_HOUR = 2;
 export const COMMERCIAL_RESTOCK_PER_HOUR = 2;

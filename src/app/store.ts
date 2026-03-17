@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
-import { STARTER_WORLD_SEED } from '../sim/constants';
+import { HOME_PANTRY_UNITS_PER_RESIDENT, STARTER_WORLD_SEED } from '../sim/constants';
 import { TileType, BuildMode, BuildingKind, WorldState } from '../sim/types';
 import { createStarterWorld } from '../sim/world';
 import { getTile, pointToTile, setTile } from '../sim/utils';
@@ -124,6 +124,8 @@ export const useWorldStore = create<WorldStore>((set) => ({
           tile: point,
           stock: buildingKind === BuildingKind.Commercial ? 4 : buildingKind === BuildingKind.Industrial ? 2 : 0,
           capacity: buildingKind === BuildingKind.Residential ? 2 : 4,
+          pantryStock: buildingKind === BuildingKind.Residential ? 2 : 0,
+          pantryCapacity: buildingKind === BuildingKind.Residential ? 2 * HOME_PANTRY_UNITS_PER_RESIDENT : 0,
           label: `${buildingKind.toLowerCase()}-${x}-${y}`,
         });
         setTile(world, point, {

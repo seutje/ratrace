@@ -1,5 +1,6 @@
 import {
   COMMERCIAL_RESTOCK_PER_HOUR,
+  HOME_PANTRY_UNITS_PER_RESIDENT,
   HOURLY_WAGE,
   INDUSTRIAL_OUTPUT_PER_HOUR,
   STARTER_COMMERCIAL_CAPACITY,
@@ -228,14 +229,19 @@ const createDistrictBuildings = (
   capacity: number,
   stock: number,
 ) =>
-  lots.slice(0, count).map(({ point }, index) => ({
-    id: `${kind.toLowerCase()}-${point.x}-${point.y}`,
-    kind,
-    tile: point,
-    stock,
-    capacity,
-    label: createBuildingLabel(seed, rng, kind, index),
-  }));
+  lots.slice(0, count).map(({ point }, index) => {
+    const pantryCapacity = kind === BuildingKind.Residential ? capacity * HOME_PANTRY_UNITS_PER_RESIDENT : 0;
+    return {
+      id: `${kind.toLowerCase()}-${point.x}-${point.y}`,
+      kind,
+      tile: point,
+      stock,
+      capacity,
+      pantryStock: kind === BuildingKind.Residential ? capacity : 0,
+      pantryCapacity,
+      label: createBuildingLabel(seed, rng, kind, index),
+    };
+  });
 
 const createAgentName = (rng: () => number) =>
   `${firstNames[Math.floor(rng() * firstNames.length)]} ${lastNames[Math.floor(rng() * lastNames.length)]}`;
@@ -376,8 +382,8 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
       totalWealth:
         5000 +
         agents.reduce((sum, agent) => sum + agent.wallet, 0) +
-        buildings.reduce((sum, building) => sum + building.stock * 2, 0),
-      supplyStock: buildings.reduce((sum, building) => sum + building.stock, 0),
+        buildings.reduce((sum, building) => sum + (building.stock + building.pantryStock) * 2, 0),
+      supplyStock: buildings.reduce((sum, building) => sum + building.stock + building.pantryStock, 0),
     },
     entities: {
       agents,
