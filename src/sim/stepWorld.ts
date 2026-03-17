@@ -6,6 +6,8 @@ import {
   HOUSEHOLD_GROWTH_WALLET_THRESHOLD,
   HOURLY_WAGE,
   INDUSTRIAL_OUTPUT_PER_HOUR,
+  INDUSTRIAL_STARTING_CASH,
+  INDUSTRIAL_SUBSIDY_PER_HOUR,
   MAX_STAT,
   PACKED_LUNCH_CAPACITY,
   PANTRY_MEAL_HUNGER_RECOVERY,
@@ -22,6 +24,7 @@ import {
   SLEEP_ENERGY_THRESHOLD,
   SLEEP_START_MINUTE,
   STARVATION_CULL_DAYS,
+  TREASURY_RESERVE_TARGET,
   WHOLESALE_PRICE_PER_UNIT,
   WORK_SHIFT_MINUTES,
   dayMinutes,
@@ -858,6 +861,40 @@ const restockCommercialBuildings = (world: WorldState, buildingIndex: StepBuildi
   }
 };
 
+const subsidizeIndustry = (world: WorldState, buildingIndex: StepBuildingIndex) => {
+  if (world.minutesOfDay % 60 !== 0) {
+    return;
+  }
+
+  let availableSubsidy = Math.max(0, world.economy.treasury - TREASURY_RESERVE_TARGET);
+  if (availableSubsidy <= 0) {
+    return;
+  }
+
+  const industriesNeedingSupport = getBuildingsByKind(buildingIndex, BuildingKind.Industrial)
+    .filter((building) => building.cash < INDUSTRIAL_STARTING_CASH)
+    .sort((left, right) => left.cash - right.cash || left.id.localeCompare(right.id));
+
+  for (const building of industriesNeedingSupport) {
+    if (availableSubsidy <= 0) {
+      break;
+    }
+
+    const grant = Math.min(
+      INDUSTRIAL_SUBSIDY_PER_HOUR,
+      INDUSTRIAL_STARTING_CASH - building.cash,
+      availableSubsidy,
+    );
+    if (grant <= 0) {
+      continue;
+    }
+
+    building.cash += grant;
+    world.economy.treasury -= grant;
+    availableSubsidy -= grant;
+  }
+};
+
 const nextAgentId = (world: WorldState) => {
   let highestNumericId = 0;
 
@@ -1045,6 +1082,7 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
       const [firstParent, secondParent] = residents;
       firstParent.wallet -= HOUSEHOLD_GROWTH_COST;
       secondParent.wallet -= HOUSEHOLD_GROWTH_COST;
+      world.economy.treasury += HOUSEHOLD_GROWTH_COST * 2;
       world.entities.agents.push(createHouseholdGrowthAgent(world, targetHome, assignment));
       occupied.set(targetHome.id, (occupied.get(targetHome.id) ?? 0) + 1);
       const targetResidents = households.get(targetHome.id);
@@ -1070,6 +1108,7 @@ export const stepWorld = (inputWorld: WorldState): WorldState => {
     world.day += 1;
   }
 
+  subsidizeIndustry(world, buildingIndex);
   computeTraffic(world);
   restockCommercialBuildings(world, buildingIndex);
   const reservations = createOccupancyReservations(world);

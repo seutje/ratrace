@@ -5,6 +5,8 @@ import { paintWorldTile } from '../sim/worldMutations';
 import {
   HOUSEHOLD_GROWTH_COST,
   INDUSTRIAL_OUTPUT_PER_HOUR,
+  INDUSTRIAL_STARTING_CASH,
+  INDUSTRIAL_SUBSIDY_PER_HOUR,
   RETAIL_SALES_TAX_PER_UNIT,
   SLEEP_MINIMUM_MINUTES,
   SHOP_PRICE_PER_UNIT,
@@ -12,6 +14,7 @@ import {
   SHOPPING_BASKET_UNITS,
   SHOPPING_COOLDOWN_TICKS,
   SHOPPING_HUNGER_THRESHOLD,
+  TREASURY_RESERVE_TARGET,
   WHOLESALE_PRICE_PER_UNIT,
   WORK_SHIFT_MINUTES,
   ticksPerSecond,
@@ -609,6 +612,31 @@ describe('economy', () => {
     expect(next.entities.buildings.find((building) => building.id === 'shop')!.cash).toBe(20 - 4 * WHOLESALE_PRICE_PER_UNIT);
     expect(next.entities.buildings.find((building) => building.id === 'mill')!.stock).toBe(1);
     expect(next.entities.buildings.find((building) => building.id === 'mill')!.cash).toBe(50 + 4 * WHOLESALE_PRICE_PER_UNIT);
+  });
+
+  it('recirculates treasury surplus into cash-poor industry', () => {
+    const world = createBlankWorld(2, 1);
+    world.economy.treasury = TREASURY_RESERVE_TARGET + 20;
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Industrial, buildingId: 'mill' });
+    world.entities.buildings.push({
+      id: 'mill',
+      kind: BuildingKind.Industrial,
+      tile: { x: 0, y: 0 },
+      cash: INDUSTRIAL_STARTING_CASH - 20,
+      stock: 0,
+      capacity: 4,
+      pantryStock: 0,
+      pantryCapacity: 0,
+      label: 'mill',
+    });
+    world.minutesOfDay = 59;
+
+    const next = stepWorld(world);
+
+    expect(next.entities.buildings.find((building) => building.id === 'mill')!.cash).toBe(
+      INDUSTRIAL_STARTING_CASH - 20 + INDUSTRIAL_SUBSIDY_PER_HOUR,
+    );
+    expect(next.economy.treasury).toBe(TREASURY_RESERVE_TARGET + 20 - INDUSTRIAL_SUBSIDY_PER_HOUR);
   });
 
   it('grows the treasury over the first day in the starter city', () => {
@@ -1261,6 +1289,7 @@ describe('traffic and lifecycle', () => {
     expect(next.entities.agents).toHaveLength(3);
     expect(next.entities.agents[0]!.wallet).toBe(0);
     expect(next.entities.agents[1]!.wallet).toBe(0);
+    expect(next.economy.treasury).toBe(world.economy.treasury + HOUSEHOLD_GROWTH_COST * 2);
     expect(next.entities.agents[2]!.homeId).toBe('home');
     expect(next.entities.agents[2]!.workId).toBe('work');
     expect(next.entities.agents[2]!.name).toMatch(agentNamePattern);
@@ -1313,6 +1342,7 @@ describe('traffic and lifecycle', () => {
 
     expect(next.entities.agents).toHaveLength(5);
     expect(next.entities.agents.filter((agent) => agent.wallet === 0)).toHaveLength(2);
+    expect(next.economy.treasury).toBe(world.economy.treasury + HOUSEHOLD_GROWTH_COST * 2);
   });
 
   it('remains stable over a longer deterministic soak', () => {
