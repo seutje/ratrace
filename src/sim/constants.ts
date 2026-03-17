@@ -42,7 +42,8 @@ export const INDUSTRIAL_OUTPUT_PER_HOUR = 10;
 export const COMMERCIAL_RESTOCK_PER_HOUR = 2;
 export const WHOLESALE_PRICE_PER_UNIT = 2;
 export const COMMERCIAL_STARTING_CASH = 240;
-export const INDUSTRIAL_STARTING_CASH = 320;
+// Seed enough payroll for the busiest starter factory to cover ten full workdays.
+export const INDUSTRIAL_STARTING_CASH = ((HOURLY_WAGE * WORK_SHIFT_MINUTES * 10) / 60) * 10;
 export const TREASURY_RESERVE_TARGET = 6000;
 export const INDUSTRIAL_SUBSIDY_PER_HOUR = 8;
 export const HOUSEHOLD_GROWTH_COST = 1000;
