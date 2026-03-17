@@ -1,6 +1,9 @@
 import {
   BASE_MOVE_SPEED,
   COMMERCIAL_RESTOCK_PER_HOUR,
+  HOUSEHOLD_GROWTH_COST,
+  HOUSEHOLD_GROWTH_HAPPINESS_THRESHOLD,
+  HOUSEHOLD_GROWTH_WALLET_THRESHOLD,
   HOURLY_WAGE,
   INDUSTRIAL_OUTPUT_PER_HOUR,
   MAX_STAT,
@@ -813,7 +816,92 @@ const restockCommercialBuildings = (world: WorldState, buildingIndex: StepBuildi
   }
 };
 
-const nextAgentId = (world: WorldState) => `agent-${world.entities.agents.length + world.day + 1}`;
+const nextAgentId = (world: WorldState) => {
+  let highestNumericId = 0;
+
+  for (const agent of world.entities.agents) {
+    const match = /^agent-(\d+)$/.exec(agent.id);
+    if (!match) {
+      continue;
+    }
+
+    highestNumericId = Math.max(highestNumericId, Number(match[1]));
+  }
+
+  return `agent-${highestNumericId + 1}`;
+};
+
+const pickHomeWithCapacity = (
+  homes: Building[],
+  occupied: Map<string, number>,
+  preferredHomeId?: string,
+  from?: Point,
+) => {
+  const candidates = homes.filter((building) => (occupied.get(building.id) ?? 0) < building.capacity);
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  if (preferredHomeId) {
+    const preferred = candidates.find((building) => building.id === preferredHomeId);
+    if (preferred) {
+      return preferred;
+    }
+  }
+
+  if (!from) {
+    return candidates[0];
+  }
+
+  return candidates.reduce<Building | undefined>((nearest, candidate) => {
+    if (!nearest) {
+      return candidate;
+    }
+
+    const nearestDistance = Math.abs(nearest.tile.x - from.x) + Math.abs(nearest.tile.y - from.y);
+    const candidateDistance = Math.abs(candidate.tile.x - from.x) + Math.abs(candidate.tile.y - from.y);
+    if (candidateDistance < nearestDistance) {
+      return candidate;
+    }
+
+    if (candidateDistance === nearestDistance && candidate.id < nearest.id) {
+      return candidate;
+    }
+
+    return nearest;
+  }, undefined);
+};
+
+const qualifiesForHouseholdGrowth = (agent: Agent) =>
+  agent.wallet >= HOUSEHOLD_GROWTH_WALLET_THRESHOLD && agent.stats.happiness >= HOUSEHOLD_GROWTH_HAPPINESS_THRESHOLD;
+
+const createHouseholdGrowthAgent = (world: WorldState, home: Building, assignment: NonNullable<ReturnType<typeof pickEmploymentAssignment>>) => ({
+  id: nextAgentId(world),
+  name: `Resident ${world.day}-${world.entities.agents.length + 1}`,
+  pos: { x: home.tile.x + 0.5, y: home.tile.y + 0.5 },
+  wallet: 18,
+  carriedMeals: 0,
+  stats: { hunger: 24, energy: 72, happiness: 64 },
+  homeId: home.id,
+  workId: assignment.workId,
+  state: AgentState.Idle,
+  thought: 'New to the household.',
+  route: [],
+  routeIndex: 0,
+  routeComputeCount: 0,
+  routeMapVersion: world.metrics.mapVersion,
+  destination: undefined,
+  lastShoppedTick: undefined,
+  sleepUntilTick: undefined,
+  shiftStartMinute: assignment.shiftStartMinute,
+  shiftDay: 0,
+  shiftWorkMinutes: 0,
+  paidShiftWorkMinutes: 0,
+  lastCompletedShiftDay: 0,
+  daysInCity: 0,
+  maxHungerStreakDays: 0,
+  keptMaxHungerToday: false,
+});
 
 const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingIndex) => {
   if (world.minutesOfDay !== 0) {
@@ -839,49 +927,90 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
   }
   const freeSlots = capacity - world.entities.agents.length;
 
-  if (freeSlots > 0 && world.day % 2 === 0) {
+  if (freeSlots > 0) {
     const occupied = new Map<string, number>();
+    const households = new Map<string, Agent[]>();
+
     for (const agent of world.entities.agents) {
       occupied.set(agent.homeId, (occupied.get(agent.homeId) ?? 0) + 1);
+      const residents = households.get(agent.homeId);
+      if (residents) {
+        residents.push(agent);
+      } else {
+        households.set(agent.homeId, [agent]);
+      }
     }
 
-    const home = homes.find((building) => (occupied.get(building.id) ?? 0) < building.capacity);
-    const assignment = pickEmploymentAssignment(
-      world.entities.buildings,
-      world.entities.agents.map((agent) => ({
-        workId: agent.workId,
-        shiftStartMinute: agent.shiftStartMinute,
-      })),
-    );
+    const growthHomes = homes.filter((home) => {
+      const residents = households.get(home.id) ?? [];
+      return residents.filter(qualifiesForHouseholdGrowth).length >= 2;
+    });
 
-    if (home && assignment) {
-      world.entities.agents.push({
-        id: nextAgentId(world),
-        name: `Newcomer ${world.day}`,
-        pos: { x: home.tile.x + 0.5, y: home.tile.y + 0.5 },
-        wallet: 18,
-        carriedMeals: 0,
-        stats: { hunger: 24, energy: 72, happiness: 64 },
-        homeId: home.id,
-        workId: assignment.workId,
-        state: AgentState.Idle,
-        thought: 'Just moved in.',
-        route: [],
-        routeIndex: 0,
-        routeComputeCount: 0,
-        routeMapVersion: world.metrics.mapVersion,
-        destination: undefined,
-        lastShoppedTick: undefined,
-        sleepUntilTick: undefined,
-        shiftStartMinute: assignment.shiftStartMinute,
-        shiftDay: 0,
-        shiftWorkMinutes: 0,
-        paidShiftWorkMinutes: 0,
-        lastCompletedShiftDay: 0,
-        daysInCity: 0,
-        maxHungerStreakDays: 0,
-        keptMaxHungerToday: false,
-      });
+    growthHomes.sort((left, right) => {
+      const leftResidents = households.get(left.id) ?? [];
+      const rightResidents = households.get(right.id) ?? [];
+      const leftSurplus = leftResidents.reduce(
+        (sum, agent) =>
+          sum +
+          Math.max(0, agent.wallet - HOUSEHOLD_GROWTH_WALLET_THRESHOLD) +
+          Math.max(0, agent.stats.happiness - HOUSEHOLD_GROWTH_HAPPINESS_THRESHOLD) * 10,
+        0,
+      );
+      const rightSurplus = rightResidents.reduce(
+        (sum, agent) =>
+          sum +
+          Math.max(0, agent.wallet - HOUSEHOLD_GROWTH_WALLET_THRESHOLD) +
+          Math.max(0, agent.stats.happiness - HOUSEHOLD_GROWTH_HAPPINESS_THRESHOLD) * 10,
+        0,
+      );
+
+      return rightSurplus - leftSurplus || left.id.localeCompare(right.id);
+    });
+
+    for (const home of growthHomes) {
+      if (world.entities.agents.length >= capacity) {
+        break;
+      }
+
+      const residents = (households.get(home.id) ?? [])
+        .filter(qualifiesForHouseholdGrowth)
+        .sort(
+          (left, right) =>
+            right.wallet - left.wallet ||
+            right.stats.happiness - left.stats.happiness ||
+            left.id.localeCompare(right.id),
+        );
+      if (residents.length < 2) {
+        continue;
+      }
+
+      const targetHome = pickHomeWithCapacity(homes, occupied, home.id, home.tile);
+      if (!targetHome) {
+        break;
+      }
+
+      const assignment = pickEmploymentAssignment(
+        world.entities.buildings,
+        world.entities.agents.map((agent) => ({
+          workId: agent.workId,
+          shiftStartMinute: agent.shiftStartMinute,
+        })),
+      );
+      if (!assignment) {
+        break;
+      }
+
+      const [firstParent, secondParent] = residents;
+      firstParent.wallet -= HOUSEHOLD_GROWTH_COST;
+      secondParent.wallet -= HOUSEHOLD_GROWTH_COST;
+      world.entities.agents.push(createHouseholdGrowthAgent(world, targetHome, assignment));
+      occupied.set(targetHome.id, (occupied.get(targetHome.id) ?? 0) + 1);
+      const targetResidents = households.get(targetHome.id);
+      if (targetResidents) {
+        targetResidents.push(world.entities.agents[world.entities.agents.length - 1]!);
+      } else {
+        households.set(targetHome.id, [world.entities.agents[world.entities.agents.length - 1]!]);
+      }
     }
   }
 

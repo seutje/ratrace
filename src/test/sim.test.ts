@@ -2,6 +2,7 @@ import { createBlankWorld, createStarterWorld } from '../sim/world';
 import { COMMERCIAL_SHIFT_PROFILES, COMMERCIAL_WORKER_SHARE, INDUSTRIAL_SHIFT_PROFILES } from '../sim/employment';
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
 import {
+  HOUSEHOLD_GROWTH_COST,
   SLEEP_MINIMUM_MINUTES,
   STARTER_POPULATION,
   SHOPPING_BASKET_UNITS,
@@ -1008,6 +1009,108 @@ describe('traffic and lifecycle', () => {
 
     expect(world.entities.agents.some((entry) => entry.id === agent.id)).toBe(true);
     expect(world.entities.agents.find((entry) => entry.id === agent.id)?.maxHungerStreakDays).toBe(1);
+  });
+
+  it('grows a household when two residents can afford it and housing is available', () => {
+    const world = createBlankWorld(4, 1);
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Industrial, buildingId: 'work' });
+    world.entities.buildings.push(
+      {
+        id: 'home',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 0 },
+        stock: 0,
+        capacity: 3,
+        pantryStock: 6,
+        pantryCapacity: 6,
+        label: 'home',
+      },
+      {
+        id: 'work',
+        kind: BuildingKind.Industrial,
+        tile: { x: 1, y: 0 },
+        stock: 0,
+        capacity: 4,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'work',
+      },
+    );
+    world.metrics.populationCapacity = 3;
+    world.entities.agents = [
+      makeTestAgent({
+        id: 'agent-1',
+        homeId: 'home',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 0 }),
+        wallet: HOUSEHOLD_GROWTH_COST,
+        stats: { hunger: 10, energy: 90, happiness: 80 },
+      }),
+      makeTestAgent({
+        id: 'agent-2',
+        homeId: 'home',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 0 }),
+        wallet: HOUSEHOLD_GROWTH_COST,
+        stats: { hunger: 10, energy: 90, happiness: 80 },
+      }),
+    ];
+    world.minutesOfDay = 23 * 60 + 59;
+
+    const next = stepWorld(world);
+
+    expect(next.entities.agents).toHaveLength(3);
+    expect(next.entities.agents[0]!.wallet).toBe(0);
+    expect(next.entities.agents[1]!.wallet).toBe(0);
+    expect(next.entities.agents[2]!.homeId).toBe('home');
+    expect(next.entities.agents[2]!.workId).toBe('work');
+    expect(next.entities.agents[2]!.thought).toBe('New to the household.');
+  });
+
+  it('limits household growth to one new resident per household each day', () => {
+    const world = createBlankWorld(4, 1);
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Industrial, buildingId: 'work' });
+    world.entities.buildings.push(
+      {
+        id: 'home',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 0 },
+        stock: 0,
+        capacity: 6,
+        pantryStock: 12,
+        pantryCapacity: 12,
+        label: 'home',
+      },
+      {
+        id: 'work',
+        kind: BuildingKind.Industrial,
+        tile: { x: 1, y: 0 },
+        stock: 0,
+        capacity: 6,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'work',
+      },
+    );
+    world.metrics.populationCapacity = 6;
+    world.entities.agents = ['agent-1', 'agent-2', 'agent-3', 'agent-4'].map((id) =>
+      makeTestAgent({
+        id,
+        homeId: 'home',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 0 }),
+        wallet: HOUSEHOLD_GROWTH_COST,
+        stats: { hunger: 10, energy: 90, happiness: 80 },
+      }),
+    );
+    world.minutesOfDay = 23 * 60 + 59;
+
+    const next = stepWorld(world);
+
+    expect(next.entities.agents).toHaveLength(5);
+    expect(next.entities.agents.filter((agent) => agent.wallet === 0)).toHaveLength(2);
   });
 
   it('remains stable over a longer deterministic soak', () => {
