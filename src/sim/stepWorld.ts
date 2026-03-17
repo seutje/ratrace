@@ -40,15 +40,101 @@ import {
   formatClock,
   getTile,
   samePoint,
+  tileKey,
   toClockNumber,
 } from './utils';
-import { getAgentCurrentTile, getAgentTrafficKey, getRouteTargetPoint, getLaneDirection } from './lanes';
+import {
+  getAgentCurrentTile,
+  getAgentTrafficKey,
+  getLaneDirection,
+  getRoadLaneCenter,
+  getRouteTargetPoint,
+} from './lanes';
 
 const isPastWorkStart = (minutes: number) => minutes >= WORK_START_MINUTE;
 const isSleepHours = (minutes: number) => minutes >= SLEEP_START_MINUTE || minutes < SLEEP_END_MINUTE;
 const hasActiveShift = (agent: Agent) => agent.shiftDay > 0 && agent.shiftWorkMinutes < WORK_SHIFT_MINUTES;
 const isCommittedToSleep = (agent: Agent, world: WorldState) =>
   agent.sleepUntilTick !== undefined && world.tick < agent.sleepUntilTick;
+const overlapAllowedTileTypes = new Set<TileType>([
+  TileType.Residential,
+  TileType.Commercial,
+  TileType.Industrial,
+]);
+const ROAD_RIGHT_OF_WAY_EPSILON = 1e-3;
+type OccupancyReservations = Map<string, number>;
+
+const allowsAgentOverlap = (tileType: TileType) => overlapAllowedTileTypes.has(tileType);
+
+const addReservation = (reservations: OccupancyReservations, key?: string) => {
+  if (!key) {
+    return;
+  }
+
+  reservations.set(key, (reservations.get(key) ?? 0) + 1);
+};
+
+const removeReservation = (reservations: OccupancyReservations, key?: string) => {
+  if (!key) {
+    return;
+  }
+
+  const next = (reservations.get(key) ?? 0) - 1;
+  if (next > 0) {
+    reservations.set(key, next);
+    return;
+  }
+
+  reservations.delete(key);
+};
+
+const createOccupancyReservations = (world: WorldState) => {
+  const reservations: OccupancyReservations = new Map();
+
+  world.entities.agents.forEach((agent) => {
+    const currentTile = getAgentCurrentTile(agent);
+    const currentTileType = getTile(world, currentTile)?.type ?? TileType.Empty;
+    if (allowsAgentOverlap(currentTileType)) {
+      return;
+    }
+
+    addReservation(reservations, getAgentTrafficKey(world, agent, currentTile, currentTileType));
+  });
+
+  return reservations;
+};
+
+const getTargetOccupancyKey = (world: WorldState, currentTile: Point, targetTile?: Point) => {
+  if (!targetTile) {
+    return undefined;
+  }
+
+  const targetTileType = getTile(world, targetTile)?.type ?? TileType.Empty;
+  if (allowsAgentOverlap(targetTileType)) {
+    return undefined;
+  }
+
+  const direction = targetTileType === TileType.Road ? getLaneDirection(currentTile, targetTile) : undefined;
+  return direction ? `${tileKey(targetTile)}:${direction}` : tileKey(targetTile);
+};
+
+const getRoadYieldPoint = (currentTile: Point, direction: ReturnType<typeof getLaneDirection>) => {
+  if (!direction) {
+    return undefined;
+  }
+
+  const laneCenter = getRoadLaneCenter(currentTile, direction);
+  switch (direction) {
+    case 'east':
+      return { x: currentTile.x + 1 - ROAD_RIGHT_OF_WAY_EPSILON, y: laneCenter.y };
+    case 'west':
+      return { x: currentTile.x + ROAD_RIGHT_OF_WAY_EPSILON, y: laneCenter.y };
+    case 'north':
+      return { x: laneCenter.x, y: currentTile.y + ROAD_RIGHT_OF_WAY_EPSILON };
+    case 'south':
+      return { x: laneCenter.x, y: currentTile.y + 1 - ROAD_RIGHT_OF_WAY_EPSILON };
+  }
+};
 const getRequiredSleepTicks = (agent: Agent) => {
   const minimumSleepTicks = Math.ceil(SLEEP_MINIMUM_MINUTES / gameMinutesPerTick);
   const missingEnergy = Math.max(0, SLEEP_TARGET_ENERGY - agent.stats.energy);
@@ -122,43 +208,25 @@ const moveAxisToward = (current: number, target: number, maxStep: number) => {
   };
 };
 
-const moveAgent = (world: WorldState, agent: Agent) => {
-  if (!agent.destination || agent.routeIndex >= agent.route.length) {
-    return;
-  }
-
-  const currentTile = getAgentCurrentTile(agent);
-  const currentTileType = getTile(world, currentTile)?.type ?? TileType.Empty;
-  const occupancy = world.traffic[getAgentTrafficKey(world, agent, currentTile, currentTileType)] ?? 0;
-  const congestionFactor = currentTileType === TileType.Road ? getCongestionSpeedFactor(occupancy) : 1;
-  const roadMultiplier = currentTileType === TileType.Road ? ROAD_SPEED_MULTIPLIER : 1;
-  const stepDistance = BASE_MOVE_SPEED * roadMultiplier * congestionFactor;
-
-  const target = getRouteTargetPoint(world, agent, currentTile);
+const moveTowardPoint = (agent: Agent, target: Point, stepDistance: number, direction?: ReturnType<typeof getLaneDirection>) => {
   const remainingDistance = distance(agent.pos, target);
-
   if (remainingDistance <= stepDistance) {
     agent.pos = target;
-    agent.routeIndex += 1;
-    return;
+    return true;
   }
 
-  const targetTile = agent.route[agent.routeIndex];
-  const targetTileType = targetTile ? getTile(world, targetTile)?.type ?? TileType.Empty : TileType.Empty;
-  const direction = targetTile ? getLaneDirection(currentTile, targetTile) : undefined;
+  if (direction === 'east' || direction === 'west') {
+    const yMove = moveAxisToward(agent.pos.y, target.y, stepDistance);
+    const xMove = moveAxisToward(agent.pos.x, target.x, stepDistance - yMove.used);
+    agent.pos = { x: xMove.value, y: yMove.value };
+    return false;
+  }
 
-  if (currentTileType === TileType.Road && targetTileType === TileType.Road && direction) {
-    if (direction === 'east' || direction === 'west') {
-      const yMove = moveAxisToward(agent.pos.y, target.y, stepDistance);
-      const xMove = moveAxisToward(agent.pos.x, target.x, stepDistance - yMove.used);
-      agent.pos = { x: xMove.value, y: yMove.value };
-      return;
-    }
-
+  if (direction === 'north' || direction === 'south') {
     const xMove = moveAxisToward(agent.pos.x, target.x, stepDistance);
     const yMove = moveAxisToward(agent.pos.y, target.y, stepDistance - xMove.used);
     agent.pos = { x: xMove.value, y: yMove.value };
-    return;
+    return false;
   }
 
   const ratio = stepDistance / remainingDistance;
@@ -166,6 +234,67 @@ const moveAgent = (world: WorldState, agent: Agent) => {
     x: agent.pos.x + (target.x - agent.pos.x) * ratio,
     y: agent.pos.y + (target.y - agent.pos.y) * ratio,
   };
+  return false;
+};
+
+const moveAgent = (world: WorldState, agent: Agent, reservations: OccupancyReservations) => {
+  const currentTile = getAgentCurrentTile(agent);
+  const currentTileType = getTile(world, currentTile)?.type ?? TileType.Empty;
+  const currentReservationKey = allowsAgentOverlap(currentTileType)
+    ? undefined
+    : getAgentTrafficKey(world, agent, currentTile, currentTileType);
+
+  removeReservation(reservations, currentReservationKey);
+
+  if (!agent.destination || agent.routeIndex >= agent.route.length) {
+    if (!allowsAgentOverlap(currentTileType)) {
+      addReservation(reservations, currentReservationKey);
+    }
+    return;
+  }
+
+  const occupancy = world.traffic[getAgentTrafficKey(world, agent, currentTile, currentTileType)] ?? 0;
+  const congestionFactor = currentTileType === TileType.Road ? getCongestionSpeedFactor(occupancy) : 1;
+  const roadMultiplier = currentTileType === TileType.Road ? ROAD_SPEED_MULTIPLIER : 1;
+  const stepDistance = BASE_MOVE_SPEED * roadMultiplier * congestionFactor;
+  const targetTile = agent.route[agent.routeIndex];
+  const targetTileType = targetTile ? getTile(world, targetTile)?.type ?? TileType.Empty : TileType.Empty;
+  const direction = targetTile ? getLaneDirection(currentTile, targetTile) : undefined;
+  const targetOccupancyKey = getTargetOccupancyKey(world, currentTile, targetTile);
+
+  if (targetOccupancyKey && (reservations.get(targetOccupancyKey) ?? 0) > 0) {
+    if (currentTileType === TileType.Road && targetTileType === TileType.Road && direction) {
+      const yieldTarget = getRoadYieldPoint(currentTile, direction);
+      if (yieldTarget) {
+        moveTowardPoint(agent, yieldTarget, stepDistance, direction);
+      }
+    }
+
+    const blockedTile = getAgentCurrentTile(agent);
+    const blockedTileType = getTile(world, blockedTile)?.type ?? TileType.Empty;
+    if (!allowsAgentOverlap(blockedTileType)) {
+      addReservation(reservations, getAgentTrafficKey(world, agent, blockedTile, blockedTileType));
+    }
+    return;
+  }
+
+  const target = getRouteTargetPoint(world, agent, currentTile);
+
+  const arrived = moveTowardPoint(
+    agent,
+    target,
+    stepDistance,
+    currentTileType === TileType.Road && targetTileType === TileType.Road ? direction : undefined,
+  );
+  if (arrived) {
+    agent.routeIndex += 1;
+  }
+
+  const finalTile = getAgentCurrentTile(agent);
+  const finalTileType = getTile(world, finalTile)?.type ?? TileType.Empty;
+  if (!allowsAgentOverlap(finalTileType)) {
+    addReservation(reservations, getAgentTrafficKey(world, agent, finalTile, finalTileType));
+  }
 };
 
 const activateShiftIfDue = (world: WorldState, agent: Agent) => {
@@ -356,7 +485,7 @@ const applyDestinationState = (agent: Agent, destination?: AgentDestination) => 
   }
 };
 
-const routeAgent = (world: WorldState, agent: Agent) => {
+const routeAgent = (world: WorldState, agent: Agent, reservations: OccupancyReservations) => {
   activateShiftIfDue(world, agent);
   const destination = determineDestination(world, agent);
   if (!destination) {
@@ -387,7 +516,7 @@ const routeAgent = (world: WorldState, agent: Agent) => {
 
   applyDestinationState(agent, destination);
   assignRoute(world, agent, destination, building.tile);
-  moveAgent(world, agent);
+  moveAgent(world, agent, reservations);
 
   const arrivedTile = getAgentCurrentTile(agent);
   if (arrivedTile.x === building.tile.x && arrivedTile.y === building.tile.y) {
@@ -493,9 +622,10 @@ export const stepWorld = (inputWorld: WorldState): WorldState => {
 
   computeTraffic(world);
   restockCommercialBuildings(world);
+  const reservations = createOccupancyReservations(world);
   world.entities.agents.forEach((agent) => {
     updateAgentStats(agent);
-    routeAgent(world, agent);
+    routeAgent(world, agent, reservations);
   });
   runPopulationTurnover(world);
   updateEconomyTotals(world);

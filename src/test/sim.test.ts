@@ -463,6 +463,28 @@ describe('economy', () => {
 });
 
 describe('traffic and lifecycle', () => {
+  it('allows multiple agents to overlap on residential tiles', () => {
+    const world = createBlankWorld(2, 2);
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });
+    world.entities.buildings.push({
+      id: 'home',
+      kind: BuildingKind.Residential,
+      tile: { x: 0, y: 0 },
+      stock: 0,
+      capacity: 3,
+      label: 'home',
+    });
+    world.entities.agents.push(
+      makeTestAgent({ id: 'resident-a', homeId: 'home', workId: 'home', pos: tileCenter({ x: 0, y: 0 }) }),
+      makeTestAgent({ id: 'resident-b', homeId: 'home', workId: 'home', pos: tileCenter({ x: 0, y: 0 }) }),
+    );
+
+    const nextWorld = stepWorld(world);
+
+    expect(nextWorld.entities.agents[0]!.pos).toEqual(tileCenter({ x: 0, y: 0 }));
+    expect(nextWorld.entities.agents[1]!.pos).toEqual(tileCenter({ x: 0, y: 0 }));
+  });
+
   it('uses separate lane keys for opposing traffic on the same road tile', () => {
     const world = createBlankWorld(3, 3);
     for (let x = 0; x < 3; x += 1) {
@@ -579,6 +601,58 @@ describe('traffic and lifecycle', () => {
 
     expect(movedAgent.pos.x).toBeCloseTo(1.5);
     expect(movedAgent.pos.y).toBeCloseTo(1.85);
+  });
+
+  it('holds a following car at the lane boundary until the occupied road slot clears', () => {
+    let world = createBlankWorld(5, 3);
+    for (let x = 0; x < 5; x += 1) {
+      setTile(world, { x, y: 1 }, { x, y: 1, type: TileType.Road });
+    }
+    setTile(world, { x: 0, y: 1 }, { x: 0, y: 1, type: TileType.Residential, buildingId: 'home' });
+    setTile(world, { x: 4, y: 1 }, { x: 4, y: 1, type: TileType.Industrial, buildingId: 'work' });
+
+    world.entities.buildings.push(
+      { id: 'home', kind: BuildingKind.Residential, tile: { x: 0, y: 1 }, stock: 0, capacity: 2, label: 'home' },
+      { id: 'work', kind: BuildingKind.Industrial, tile: { x: 4, y: 1 }, stock: 4, capacity: 2, label: 'work' },
+    );
+
+    world.entities.agents.push(
+      makeTestAgent({
+        id: 'back-car',
+        pos: { x: 1.5, y: 1.75 },
+        route: [
+          { x: 1, y: 1 },
+          { x: 2, y: 1 },
+          { x: 3, y: 1 },
+        ],
+        routeIndex: 1,
+        destination: { buildingId: 'work', kind: 'work' },
+        homeId: 'home',
+        workId: 'work',
+        shiftDay: world.day,
+        routeMapVersion: world.metrics.mapVersion,
+      }),
+      makeTestAgent({
+        id: 'front-car',
+        pos: { x: 2.5, y: 1.75 },
+        route: [
+          { x: 2, y: 1 },
+          { x: 3, y: 1 },
+          { x: 4, y: 1 },
+        ],
+        routeIndex: 1,
+        destination: { buildingId: 'work', kind: 'work' },
+        homeId: 'home',
+        workId: 'work',
+        shiftDay: world.day,
+        routeMapVersion: world.metrics.mapVersion,
+      }),
+    );
+
+    world = stepTimes(world, 4);
+
+    expect(world.entities.agents[0]!.pos.x).toBeLessThan(2);
+    expect(world.entities.agents[1]!.pos.x).toBeGreaterThan(3);
   });
 
   it('applies the congestion speed formula with a floor', () => {
