@@ -25,9 +25,9 @@ const agentPalette: Record<AgentState, string> = {
   [AgentState.Idle]: '#2a3127',
   [AgentState.MovingToWork]: '#b55c2f',
   [AgentState.Working]: '#9b3d1f',
-  [AgentState.MovingHome]: '#5b4fa6',
+  [AgentState.MovingHome]: '#1d6f66',
   [AgentState.Sleeping]: '#344a72',
-  [AgentState.MovingToShop]: '#1d6f66',
+  [AgentState.MovingToShop]: '#5b4fa6',
   [AgentState.Shopping]: '#0e615f',
   [AgentState.Wandering]: '#694d2c',
 };

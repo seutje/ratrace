@@ -5,9 +5,9 @@ const stateColors: Record<AgentState, string> = {
   [AgentState.Idle]: '#3d4738',
   [AgentState.MovingToWork]: '#b55c2f',
   [AgentState.Working]: '#8f2c1a',
-  [AgentState.MovingHome]: '#6252ab',
+  [AgentState.MovingHome]: '#0f6e69',
   [AgentState.Sleeping]: '#30527f',
-  [AgentState.MovingToShop]: '#0f6e69',
+  [AgentState.MovingToShop]: '#6252ab',
   [AgentState.Shopping]: '#2d8580',
   [AgentState.Wandering]: '#76532d',
 };
