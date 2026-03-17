@@ -1,7 +1,9 @@
 import {
+  COMMERCIAL_STARTING_CASH,
   COMMERCIAL_RESTOCK_PER_HOUR,
   HOME_PANTRY_UNITS_PER_RESIDENT,
   HOURLY_WAGE,
+  INDUSTRIAL_STARTING_CASH,
   INDUSTRIAL_OUTPUT_PER_HOUR,
   STARTER_COMMERCIAL_CAPACITY,
   STARTER_WORLD_HEIGHT,
@@ -17,6 +19,18 @@ import { createRng } from './random';
 import { createAgentName, createBuildingLabel } from './naming';
 import { AgentState, Building, BuildingKind, Point, Tile, TileType, WorldState } from './types';
 import { getTileIndex } from './utils';
+
+const getStartingBuildingCash = (kind: BuildingKind) => {
+  if (kind === BuildingKind.Commercial) {
+    return COMMERCIAL_STARTING_CASH;
+  }
+
+  if (kind === BuildingKind.Industrial) {
+    return INDUSTRIAL_STARTING_CASH;
+  }
+
+  return 0;
+};
 
 const makeTile = (x: number, y: number, type: TileType = TileType.Empty): Tile => ({ x, y, type });
 
@@ -214,6 +228,7 @@ const createDistrictBuildings = (
       id: `${kind.toLowerCase()}-${point.x}-${point.y}`,
       kind,
       tile: point,
+      cash: getStartingBuildingCash(kind),
       stock,
       capacity,
       pantryStock: pantryCapacity,
@@ -364,6 +379,7 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
       totalWealth:
         5000 +
         agents.reduce((sum, agent) => sum + agent.wallet, 0) +
+        buildings.reduce((sum, building) => sum + building.cash, 0) +
         buildings.reduce((sum, building) => sum + (building.stock + building.pantryStock) * 2, 0),
       supplyStock: buildings.reduce((sum, building) => sum + building.stock + building.pantryStock, 0),
     },

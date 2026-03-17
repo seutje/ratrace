@@ -9,11 +9,12 @@ import {
   MAX_STAT,
   PACKED_LUNCH_CAPACITY,
   PANTRY_MEAL_HUNGER_RECOVERY,
+  RETAIL_SALES_TAX_PER_UNIT,
   ROAD_SPEED_MULTIPLIER,
   SHOPPING_COOLDOWN_TICKS,
   SHOPPING_BASKET_UNITS,
   SHOPPING_HUNGER_THRESHOLD,
-  SHOP_PRICE,
+  SHOP_PRICE_PER_UNIT,
   SLEEP_END_MINUTE,
   SLEEP_ENERGY_RECOVERY_PER_TICK,
   SLEEP_MINIMUM_MINUTES,
@@ -21,6 +22,7 @@ import {
   SLEEP_ENERGY_THRESHOLD,
   SLEEP_START_MINUTE,
   STARVATION_CULL_DAYS,
+  WHOLESALE_PRICE_PER_UNIT,
   WORK_SHIFT_MINUTES,
   dayMinutes,
   gameMinutesPerTick,
@@ -79,6 +81,11 @@ type StepBuildingIndex = {
   commercial: Building[];
   industrial: Building[];
 };
+
+const getRetailPrice = (units: number) => units * SHOP_PRICE_PER_UNIT;
+const getRetailSalesTax = (units: number) => units * RETAIL_SALES_TAX_PER_UNIT;
+const getWholesaleCost = (units: number) => units * WHOLESALE_PRICE_PER_UNIT;
+const getMinimumShoppingCash = () => SHOP_PRICE_PER_UNIT;
 
 const cloneWorldForStep = (world: WorldState): WorldState => ({
   ...world,
@@ -243,6 +250,7 @@ const computeTraffic = (world: WorldState) => {
 
 const updateEconomyTotals = (world: WorldState) => {
   let walletTotal = 0;
+  let businessCashTotal = 0;
   let stockTotal = 0;
   let pantryTotal = 0;
   let carriedMealTotal = 0;
@@ -253,12 +261,14 @@ const updateEconomyTotals = (world: WorldState) => {
   }
 
   for (const building of world.entities.buildings) {
+    businessCashTotal += building.cash;
     stockTotal += building.stock;
     pantryTotal += building.pantryStock;
   }
 
   world.economy.supplyStock = stockTotal + pantryTotal + carriedMealTotal;
-  world.economy.totalWealth = world.economy.treasury + walletTotal + (stockTotal + pantryTotal + carriedMealTotal) * 2;
+  world.economy.totalWealth =
+    world.economy.treasury + walletTotal + businessCashTotal + (stockTotal + pantryTotal + carriedMealTotal) * 2;
 };
 
 const assignRoute = (world: WorldState, agent: Agent, destination: AgentDestination, targetPoint: Point) => {
@@ -409,11 +419,15 @@ const recordShiftWork = (agent: Agent, building: Building, world: WorldState) =>
   agent.shiftWorkMinutes = Math.min(agent.shiftWorkMinutes + gameMinutesPerTick, WORK_SHIFT_MINUTES);
 
   while (agent.shiftWorkMinutes - agent.paidShiftWorkMinutes >= 60) {
-    agent.wallet += HOURLY_WAGE;
-    if (building.kind === BuildingKind.Industrial) {
-      building.stock += INDUSTRIAL_OUTPUT_PER_HOUR;
+    if (building.cash >= HOURLY_WAGE) {
+      building.cash -= HOURLY_WAGE;
+      agent.wallet += HOURLY_WAGE;
+      if (building.kind === BuildingKind.Industrial) {
+        building.stock += INDUSTRIAL_OUTPUT_PER_HOUR;
+      }
+    } else {
+      agent.thought = 'Worked, but payroll was short.';
     }
-    world.economy.treasury = Math.max(0, world.economy.treasury - HOURLY_WAGE);
     agent.paidShiftWorkMinutes += 60;
   }
 
@@ -512,21 +526,29 @@ const arriveAtBuilding = (
       if (
         home &&
         pantryGap > 0 &&
-        agent.wallet >= SHOP_PRICE &&
         building.stock > 0 &&
         (staffedCommercialCounts.get(building.id) ?? 0) > 0 &&
         agent.lastShoppedTick !== world.tick
       ) {
-        const transferredUnits = Math.min(SHOPPING_BASKET_UNITS, pantryGap, building.stock);
+        const transferredUnits = Math.min(
+          SHOPPING_BASKET_UNITS,
+          pantryGap,
+          building.stock,
+          Math.floor(agent.wallet / SHOP_PRICE_PER_UNIT),
+        );
         if (transferredUnits <= 0) {
           break;
         }
 
+        const totalPrice = getRetailPrice(transferredUnits);
+        const salesTax = getRetailSalesTax(transferredUnits);
+
         agent.state = AgentState.Shopping;
-        agent.wallet -= SHOP_PRICE;
+        agent.wallet -= totalPrice;
         building.stock -= transferredUnits;
+        building.cash += totalPrice - salesTax;
         home.pantryStock += transferredUnits;
-        world.economy.treasury += 2;
+        world.economy.treasury += salesTax;
         agent.stats.happiness = clamp(agent.stats.happiness + 8, 0, MAX_STAT);
         agent.lastShoppedTick = world.tick;
         agent.thought = 'Pantry restocked.';
@@ -675,7 +697,7 @@ const determineDestination = (
     !!home &&
     homeNeedsPantryRefill(home) &&
     (isOnBuildingTile(agent, home) || agent.destination?.kind === 'shop');
-  if ((emergencyFoodRun || pantryRunFromHome) && agent.wallet >= SHOP_PRICE && shoppingCooldownElapsed) {
+  if ((emergencyFoodRun || pantryRunFromHome) && agent.wallet >= getMinimumShoppingCash() && shoppingCooldownElapsed) {
     const shop = nearestBuilding(buildingIndex, tile, BuildingKind.Commercial, (building) =>
       canServeShopper(staffedCommercialCounts, building),
     );
@@ -713,7 +735,9 @@ const applyDestinationState = (agent: Agent, destination?: AgentDestination) => 
     case 'home':
       agent.state = AgentState.MovingHome;
       agent.thought =
-        agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && agent.wallet < SHOP_PRICE ? 'Hungry, but broke.' : 'Going home.';
+        agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && agent.wallet < getMinimumShoppingCash()
+          ? 'Hungry, but broke.'
+          : 'Going home.';
       break;
   }
 };
@@ -748,7 +772,11 @@ const routeAgent = (
     return;
   }
 
-  if (agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && (home?.pantryStock ?? 0) <= 0 && agent.wallet < SHOP_PRICE) {
+  if (
+    agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD &&
+    (home?.pantryStock ?? 0) <= 0 &&
+    agent.wallet < getMinimumShoppingCash()
+  ) {
     agent.thought = 'Hungry, but broke.';
   }
 
@@ -805,7 +833,20 @@ const restockCommercialBuildings = (world: WorldState, buildingIndex: StepBuildi
         continue;
       }
 
-      const transfer = Math.min(COMMERCIAL_RESTOCK_PER_HOUR, needed, source.stock);
+      const affordableUnits = Math.floor(shop.cash / WHOLESALE_PRICE_PER_UNIT);
+      if (affordableUnits <= 0) {
+        break;
+      }
+
+      const transfer = Math.min(COMMERCIAL_RESTOCK_PER_HOUR, needed, source.stock, affordableUnits);
+      const wholesaleCost = getWholesaleCost(transfer);
+
+      if (transfer <= 0 || wholesaleCost <= 0) {
+        break;
+      }
+
+      shop.cash -= wholesaleCost;
+      source.cash += wholesaleCost;
       source.stock -= transfer;
       shop.stock += transfer;
       needed -= transfer;

@@ -47,6 +47,7 @@ export type Building = {
   id: string;
   kind: BuildingKind;
   tile: Point;
+  cash: number;
   stock: number;
   capacity: number;
   pantryStock: number;

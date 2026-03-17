@@ -4,11 +4,15 @@ import { advanceWorld, stepWorld } from '../sim/stepWorld';
 import { paintWorldTile } from '../sim/worldMutations';
 import {
   HOUSEHOLD_GROWTH_COST,
+  INDUSTRIAL_OUTPUT_PER_HOUR,
+  RETAIL_SALES_TAX_PER_UNIT,
   SLEEP_MINIMUM_MINUTES,
+  SHOP_PRICE_PER_UNIT,
   STARTER_POPULATION,
   SHOPPING_BASKET_UNITS,
   SHOPPING_COOLDOWN_TICKS,
   SHOPPING_HUNGER_THRESHOLD,
+  WHOLESALE_PRICE_PER_UNIT,
   WORK_SHIFT_MINUTES,
   ticksPerSecond,
 } from '../sim/constants';
@@ -445,11 +449,174 @@ describe('economy', () => {
 
     world = stepWorld(world);
     expect(world.entities.agents[0]!.wallet).toBeLessThan(afterWork.wallet);
-    expect(world.entities.agents[0]!.wallet).toBe(walletBeforeShopping - 8);
+    expect(world.entities.agents[0]!.wallet).toBe(
+      walletBeforeShopping - Math.min(SHOPPING_BASKET_UNITS, shopStockBefore, home.pantryCapacity) * SHOP_PRICE_PER_UNIT,
+    );
     expect(world.entities.buildings.find((building) => building.id === home.id)!.pantryStock).toBeGreaterThan(0);
     expect(world.entities.buildings.find((building) => building.id === shop.id)!.stock).toBe(
-      shopStockBefore - Math.min(SHOPPING_BASKET_UNITS, shopStockBefore),
+      shopStockBefore - Math.min(SHOPPING_BASKET_UNITS, shopStockBefore, home.pantryCapacity),
     );
+  });
+
+  it('pays wages from employer cash instead of the treasury', () => {
+    const world = createBlankWorld(2, 1);
+    world.economy.treasury = 75;
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Industrial, buildingId: 'work' });
+    world.entities.buildings.push(
+      {
+        id: 'home',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 1,
+        pantryStock: 1,
+        pantryCapacity: 2,
+        label: 'home',
+      },
+      {
+        id: 'work',
+        kind: BuildingKind.Industrial,
+        tile: { x: 1, y: 0 },
+        cash: 20,
+        stock: 3,
+        capacity: 1,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'work',
+      },
+    );
+    world.entities.agents = [
+      makeTestAgent({
+        homeId: 'home',
+        workId: 'work',
+        pos: tileCenter({ x: 1, y: 0 }),
+        destination: { buildingId: 'work', kind: 'work' },
+        shiftDay: world.day,
+        shiftWorkMinutes: 59,
+      }),
+    ];
+    world.minutesOfDay = 9 * 60;
+
+    const next = stepWorld(world);
+
+    expect(next.economy.treasury).toBe(75);
+    expect(next.entities.agents[0]!.wallet).toBe(32);
+    expect(next.entities.buildings.find((building) => building.id === 'work')!.cash).toBe(8);
+    expect(next.entities.buildings.find((building) => building.id === 'work')!.stock).toBe(3 + INDUSTRIAL_OUTPUT_PER_HOUR);
+  });
+
+  it('routes retail revenue into shop cash and sales tax into the treasury', () => {
+    const world = createBlankWorld(3, 1);
+    world.economy.treasury = 10;
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Commercial, buildingId: 'shop' });
+    world.entities.buildings.push(
+      {
+        id: 'home',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 1,
+        pantryStock: 0,
+        pantryCapacity: 4,
+        label: 'home',
+      },
+      {
+        id: 'shop',
+        kind: BuildingKind.Commercial,
+        tile: { x: 1, y: 0 },
+        cash: 50,
+        stock: 6,
+        capacity: 8,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'shop',
+      },
+    );
+    world.entities.agents = [
+      makeTestAgent({
+        id: 'shopper',
+        homeId: 'home',
+        workId: 'factory',
+        wallet: 30,
+        pos: tileCenter({ x: 1, y: 0 }),
+        destination: { buildingId: 'shop', kind: 'shop' },
+        shiftDay: world.day,
+        shiftWorkMinutes: WORK_SHIFT_MINUTES,
+        paidShiftWorkMinutes: WORK_SHIFT_MINUTES,
+        lastCompletedShiftDay: world.day,
+        stats: { hunger: 90, energy: 80, happiness: 60 },
+      }),
+      makeTestAgent({
+        id: 'clerk',
+        homeId: 'home',
+        workId: 'shop',
+        pos: tileCenter({ x: 1, y: 0 }),
+        destination: { buildingId: 'shop', kind: 'work' },
+        shiftDay: world.day,
+        shiftWorkMinutes: 60,
+        paidShiftWorkMinutes: 60,
+        lastCompletedShiftDay: world.day - 1,
+      }),
+    ];
+    world.minutesOfDay = 18 * 60;
+
+    const next = stepWorld(world);
+
+    expect(next.entities.agents.find((agent) => agent.id === 'shopper')!.wallet).toBe(10);
+    expect(next.entities.buildings.find((building) => building.id === 'home')!.pantryStock).toBe(4);
+    expect(next.entities.buildings.find((building) => building.id === 'shop')!.stock).toBe(2);
+    expect(next.entities.buildings.find((building) => building.id === 'shop')!.cash).toBe(50 + 4 * (SHOP_PRICE_PER_UNIT - RETAIL_SALES_TAX_PER_UNIT));
+    expect(next.economy.treasury).toBe(10 + 4 * RETAIL_SALES_TAX_PER_UNIT);
+  });
+
+  it('uses shop cash to buy inventory from industry during restocking', () => {
+    const world = createBlankWorld(3, 1);
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Commercial, buildingId: 'shop' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Industrial, buildingId: 'mill' });
+    world.entities.buildings.push(
+      {
+        id: 'shop',
+        kind: BuildingKind.Commercial,
+        tile: { x: 0, y: 0 },
+        cash: 20,
+        stock: 0,
+        capacity: 4,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'shop',
+      },
+      {
+        id: 'mill',
+        kind: BuildingKind.Industrial,
+        tile: { x: 1, y: 0 },
+        cash: 50,
+        stock: 5,
+        capacity: 4,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'mill',
+      },
+    );
+    world.minutesOfDay = 59;
+
+    const next = stepWorld(world);
+
+    expect(next.entities.buildings.find((building) => building.id === 'shop')!.stock).toBe(4);
+    expect(next.entities.buildings.find((building) => building.id === 'shop')!.cash).toBe(20 - 4 * WHOLESALE_PRICE_PER_UNIT);
+    expect(next.entities.buildings.find((building) => building.id === 'mill')!.stock).toBe(1);
+    expect(next.entities.buildings.find((building) => building.id === 'mill')!.cash).toBe(50 + 4 * WHOLESALE_PRICE_PER_UNIT);
+  });
+
+  it('grows the treasury over the first day in the starter city', () => {
+    const initial = createStarterWorld();
+
+    const next = stepTimes(initial, 24 * 60);
+
+    expect(next.economy.treasury).toBeGreaterThan(initial.economy.treasury);
   });
 
   it('requires a staffed store before an agent can buy food', () => {
@@ -757,6 +924,7 @@ describe('traffic and lifecycle', () => {
       id: 'home',
       kind: BuildingKind.Residential,
       tile: { x: 0, y: 0 },
+      cash: 0,
       stock: 0,
       capacity: 3,
       pantryStock: 3,
@@ -868,6 +1036,7 @@ describe('traffic and lifecycle', () => {
         id: 'home',
         kind: BuildingKind.Residential,
         tile: { x: 0, y: 1 },
+        cash: 0,
         stock: 0,
         capacity: 1,
         pantryStock: 1,
@@ -878,6 +1047,7 @@ describe('traffic and lifecycle', () => {
         id: 'work',
         kind: BuildingKind.Industrial,
         tile: { x: 4, y: 1 },
+        cash: 320,
         stock: 4,
         capacity: 1,
         pantryStock: 0,
@@ -923,6 +1093,7 @@ describe('traffic and lifecycle', () => {
         id: 'home',
         kind: BuildingKind.Residential,
         tile: { x: 0, y: 1 },
+        cash: 0,
         stock: 0,
         capacity: 2,
         pantryStock: 2,
@@ -933,6 +1104,7 @@ describe('traffic and lifecycle', () => {
         id: 'work',
         kind: BuildingKind.Industrial,
         tile: { x: 4, y: 1 },
+        cash: 320,
         stock: 4,
         capacity: 2,
         pantryStock: 0,
@@ -1044,6 +1216,7 @@ describe('traffic and lifecycle', () => {
         id: 'home',
         kind: BuildingKind.Residential,
         tile: { x: 0, y: 0 },
+        cash: 0,
         stock: 0,
         capacity: 3,
         pantryStock: 6,
@@ -1054,6 +1227,7 @@ describe('traffic and lifecycle', () => {
         id: 'work',
         kind: BuildingKind.Industrial,
         tile: { x: 1, y: 0 },
+        cash: 320,
         stock: 0,
         capacity: 4,
         pantryStock: 0,
@@ -1103,6 +1277,7 @@ describe('traffic and lifecycle', () => {
         id: 'home',
         kind: BuildingKind.Residential,
         tile: { x: 0, y: 0 },
+        cash: 0,
         stock: 0,
         capacity: 6,
         pantryStock: 12,
@@ -1113,6 +1288,7 @@ describe('traffic and lifecycle', () => {
         id: 'work',
         kind: BuildingKind.Industrial,
         tile: { x: 1, y: 0 },
+        cash: 320,
         stock: 0,
         capacity: 6,
         pantryStock: 0,

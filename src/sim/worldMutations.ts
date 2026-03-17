@@ -1,4 +1,4 @@
-import { HOME_PANTRY_UNITS_PER_RESIDENT } from './constants';
+import { COMMERCIAL_STARTING_CASH, HOME_PANTRY_UNITS_PER_RESIDENT, INDUSTRIAL_STARTING_CASH } from './constants';
 import { pickEmploymentAssignment } from './employment';
 import { createRuntimeBuildingLabel } from './naming';
 import { BuildMode, BuildingKind, TileType, WorldState } from './types';
@@ -15,6 +15,18 @@ const buildingKindForTile = (type: TileType) => {
     return BuildingKind.Industrial;
   }
   return undefined;
+};
+
+const getStartingBuildingCash = (kind: BuildingKind) => {
+  if (kind === BuildingKind.Commercial) {
+    return COMMERCIAL_STARTING_CASH;
+  }
+
+  if (kind === BuildingKind.Industrial) {
+    return INDUSTRIAL_STARTING_CASH;
+  }
+
+  return 0;
 };
 
 const reassignInvalidReferences = (world: WorldState) => {
@@ -78,6 +90,7 @@ export const paintWorldTile = (sourceWorld: WorldState, x: number, y: number, mo
       id: buildingId,
       kind: buildingKind,
       tile: point,
+      cash: getStartingBuildingCash(buildingKind),
       stock: buildingKind === BuildingKind.Commercial ? 4 : buildingKind === BuildingKind.Industrial ? 2 : 0,
       capacity: buildingKind === BuildingKind.Residential ? 2 : 4,
       pantryStock: buildingKind === BuildingKind.Residential ? 2 * HOME_PANTRY_UNITS_PER_RESIDENT : 0,
