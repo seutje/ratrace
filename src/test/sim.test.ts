@@ -512,6 +512,34 @@ describe('economy', () => {
     expect(world.entities.agents[0]!.state).toBe(AgentState.MovingToShop);
   });
 
+  it('keeps a pantry refill trip targeted at the shop after leaving home', () => {
+    let world = createStarterWorld();
+    const agent = world.entities.agents[0]!;
+    const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
+    const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
+    const homeApproach = orthogonalNeighbors(home.tile).find((point) => getTile(world, point)?.type === TileType.Road)!;
+
+    agent.pos = tileCenter(homeApproach);
+    agent.wallet = 100;
+    agent.stats.hunger = 20;
+    agent.stats.energy = 80;
+    agent.shiftDay = world.day;
+    agent.shiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.lastCompletedShiftDay = world.day;
+    agent.destination = { buildingId: shop.id, kind: 'shop' };
+    home.pantryStock = 1;
+    world.minutesOfDay = 18 * 60;
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents[0]!.destination?.kind).toBe('shop');
+    expect(
+      world.entities.buildings.find((building) => building.id === world.entities.agents[0]!.destination?.buildingId)?.kind,
+    ).toBe(BuildingKind.Commercial);
+    expect(world.entities.agents[0]!.state).toBe(AgentState.MovingToShop);
+  });
+
   it('does not force a home destination when already home and no need is active', () => {
     let world = createStarterWorld();
     const agent = world.entities.agents[0]!;

@@ -565,7 +565,10 @@ const determineDestination = (world: WorldState, buildingIndex: StepBuildingInde
   }
 
   const emergencyFoodRun = agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && (home?.pantryStock ?? 0) <= 0;
-  const pantryRunFromHome = home && isOnBuildingTile(agent, home) && homeNeedsPantryRefill(home);
+  const pantryRunFromHome =
+    !!home &&
+    homeNeedsPantryRefill(home) &&
+    (isOnBuildingTile(agent, home) || agent.destination?.kind === 'shop');
   if ((emergencyFoodRun || pantryRunFromHome) && agent.wallet >= SHOP_PRICE && shoppingCooldownElapsed) {
     const shop = nearestBuilding(buildingIndex, tile, BuildingKind.Commercial, (building) => building.stock > 0);
     if (shop) {

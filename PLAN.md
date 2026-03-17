@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build the simulation described in [DESIGN.md](/home/seutje/projects/ratrace/DESIGN.md) as a Vite + React + Canvas application with a deterministic simulation core, React-driven UI panels, and phased delivery that keeps the project runnable at the end of every phase.
+Build the simulation described in [DESIGN.md](DESIGN.md) as a Vite + React + Canvas application with a deterministic simulation core, React-driven UI panels, and phased delivery that keeps the project runnable at the end of every phase.
 
 ## Working Assumptions
 
