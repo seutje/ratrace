@@ -13,8 +13,14 @@ export const ROAD_SPEED_MULTIPLIER = 2;
 export const ROAD_CAPACITY = 4;
 export const MIN_SPEED_FACTOR = 0.2;
 
-export const STARTER_WORLD_WIDTH = 20;
-export const STARTER_WORLD_HEIGHT = 14;
+export const STARTER_WORLD_WIDTH = 36;
+export const STARTER_WORLD_HEIGHT = 24;
+export const STARTER_WORLD_SEED = 42;
+export const STARTER_POPULATION = 200;
+export const STARTER_ROAD_SPACING = 3;
+export const STARTER_RESIDENTIAL_CAPACITY = 4;
+export const STARTER_COMMERCIAL_CAPACITY = 18;
+export const STARTER_INDUSTRIAL_CAPACITY = 20;
 
 export const MAX_STAT = 100;
 export const SHOPPING_HUNGER_THRESHOLD = 75;

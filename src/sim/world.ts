@@ -2,69 +2,199 @@ import {
   COMMERCIAL_RESTOCK_PER_HOUR,
   HOURLY_WAGE,
   INDUSTRIAL_OUTPUT_PER_HOUR,
+  STARTER_COMMERCIAL_CAPACITY,
   STARTER_WORLD_HEIGHT,
+  STARTER_WORLD_SEED,
   STARTER_WORLD_WIDTH,
+  STARTER_INDUSTRIAL_CAPACITY,
+  STARTER_POPULATION,
+  STARTER_RESIDENTIAL_CAPACITY,
+  STARTER_ROAD_SPACING,
 } from './constants';
 import { createRng } from './random';
-import { Building, BuildingKind, Tile, TileType, WorldState, AgentState } from './types';
+import { AgentState, Building, BuildingKind, Point, Tile, TileType, WorldState } from './types';
 import { getTileIndex } from './utils';
 
 const makeTile = (x: number, y: number, type: TileType = TileType.Empty): Tile => ({ x, y, type });
 
-const starterBuildings = [
-  { id: 'home-a', kind: BuildingKind.Residential, x: 3, y: 3, label: 'Birch House', capacity: 2, stock: 0 },
-  { id: 'home-b', kind: BuildingKind.Residential, x: 5, y: 3, label: 'Linen Loft', capacity: 2, stock: 0 },
-  { id: 'home-c', kind: BuildingKind.Residential, x: 3, y: 9, label: 'Amber Flats', capacity: 2, stock: 0 },
-  { id: 'home-d', kind: BuildingKind.Residential, x: 5, y: 9, label: 'Canal Court', capacity: 2, stock: 0 },
-  { id: 'shop-a', kind: BuildingKind.Commercial, x: 14, y: 3, label: 'Morsel Mart', capacity: 4, stock: 8 },
-  { id: 'shop-b', kind: BuildingKind.Commercial, x: 16, y: 3, label: 'Corner Pantry', capacity: 4, stock: 6 },
-  { id: 'work-a', kind: BuildingKind.Industrial, x: 14, y: 9, label: 'Bolt Works', capacity: 4, stock: 6 },
-  { id: 'work-b', kind: BuildingKind.Industrial, x: 16, y: 9, label: 'Foundry Row', capacity: 4, stock: 4 },
-] as const;
-
-const starterRoads = [
-  ...Array.from({ length: STARTER_WORLD_WIDTH }, (_, x) => ({ x, y: 6 })),
-  ...Array.from({ length: STARTER_WORLD_HEIGHT }, (_, y) => ({ x: 9, y })),
-  { x: 3, y: 4 },
-  { x: 5, y: 4 },
-  { x: 3, y: 5 },
-  { x: 5, y: 5 },
-  { x: 3, y: 8 },
-  { x: 5, y: 8 },
-  { x: 3, y: 7 },
-  { x: 5, y: 7 },
-  { x: 14, y: 4 },
-  { x: 16, y: 4 },
-  { x: 14, y: 5 },
-  { x: 16, y: 5 },
-  { x: 14, y: 8 },
-  { x: 16, y: 8 },
-  { x: 14, y: 7 },
-  { x: 16, y: 7 },
-];
-
-const agentNames = ['Iris', 'Milo', 'June', 'Otis', 'Nia', 'Rhea', 'Theo', 'Pia'];
+type LotCandidate = {
+  point: Point;
+  variation: number;
+};
 
 const setTileType = (tiles: Tile[], x: number, y: number, type: TileType) => {
   tiles[y * STARTER_WORLD_WIDTH + x] = { ...tiles[y * STARTER_WORLD_WIDTH + x], type };
 };
 
-export const createStarterWorld = (seed = 7): WorldState => {
+const residentialBuildingCount = Math.ceil(STARTER_POPULATION / STARTER_RESIDENTIAL_CAPACITY);
+const commercialBuildingCount = Math.max(12, Math.ceil(STARTER_POPULATION / 14));
+const industrialBuildingCount = Math.max(16, Math.ceil(STARTER_POPULATION / 12));
+
+const firstNames = ['Ari', 'Bea', 'Cleo', 'Dax', 'Etta', 'Faye', 'Gus', 'Ivo', 'Juno', 'Kip', 'Lena', 'Miro'];
+const lastNames = ['Ash', 'Bell', 'Cinder', 'Dune', 'Elm', 'Flint', 'Grove', 'Hale', 'Irons', 'Jett', 'Keene', 'Lark'];
+const residentialLabels = ['Court', 'House', 'Heights', 'Terrace', 'Square', 'Row'];
+const commercialLabels = ['Market', 'Corner', 'Arcade', 'Exchange', 'Mart', 'Bazaar'];
+const industrialLabels = ['Works', 'Yard', 'Foundry', 'Depot', 'Mill', 'Plant'];
+
+const isRoadTile = (x: number, y: number) =>
+  x === 0 ||
+  y === 0 ||
+  x === STARTER_WORLD_WIDTH - 1 ||
+  y === STARTER_WORLD_HEIGHT - 1 ||
+  x % STARTER_ROAD_SPACING === 0 ||
+  y % STARTER_ROAD_SPACING === 0;
+
+const isAdjacentToRoad = ({ x, y }: Point) =>
+  isRoadTile(x - 1, y) || isRoadTile(x + 1, y) || isRoadTile(x, y - 1) || isRoadTile(x, y + 1);
+
+const buildLots = (rng: () => number) => {
+  const lots: LotCandidate[] = [];
+
+  for (let y = 1; y < STARTER_WORLD_HEIGHT - 1; y += 1) {
+    for (let x = 1; x < STARTER_WORLD_WIDTH - 1; x += 1) {
+      if (isRoadTile(x, y) || !isAdjacentToRoad({ x, y })) {
+        continue;
+      }
+
+      lots.push({
+        point: { x, y },
+        variation: rng(),
+      });
+    }
+  }
+
+  return lots;
+};
+
+const scoreResidentialLot = ({ point, variation }: LotCandidate) => {
+  const nx = point.x / (STARTER_WORLD_WIDTH - 1);
+  const ny = point.y / (STARTER_WORLD_HEIGHT - 1);
+  return (1 - nx) * 1.1 + (1 - ny) * 0.35 + variation * 0.45;
+};
+
+const scoreCommercialLot = ({ point, variation }: LotCandidate) => {
+  const nx = point.x / (STARTER_WORLD_WIDTH - 1);
+  const ny = point.y / (STARTER_WORLD_HEIGHT - 1);
+  return 1.4 - Math.abs(nx - 0.48) * 1.8 - Math.abs(ny - 0.35) * 1.5 + variation * 0.5;
+};
+
+const scoreIndustrialLot = ({ point, variation }: LotCandidate) => {
+  const nx = point.x / (STARTER_WORLD_WIDTH - 1);
+  const ny = point.y / (STARTER_WORLD_HEIGHT - 1);
+  return nx * 0.95 + ny * 0.9 + variation * 0.45;
+};
+
+const pickLots = (
+  lots: LotCandidate[],
+  count: number,
+  scoreLot: (lot: LotCandidate) => number,
+) => {
+  const ranked = lots
+    .map((lot) => ({
+      ...lot,
+      score: scoreLot(lot),
+    }))
+    .sort((left, right) => right.score - left.score || left.point.y - right.point.y || left.point.x - right.point.x);
+
+  return ranked.slice(0, count);
+};
+
+const withoutSelectedLots = (lots: LotCandidate[], selected: LotCandidate[]) => {
+  const taken = new Set(selected.map(({ point }) => `${point.x},${point.y}`));
+  return lots.filter(({ point }) => !taken.has(`${point.x},${point.y}`));
+};
+
+const createBuildingLabel = (
+  seed: number,
+  rng: () => number,
+  kind: BuildingKind,
+  index: number,
+) => {
+  const district = ['North', 'South', 'East', 'West', 'Central'][(seed + index) % 5];
+  const serial = Math.floor(rng() * 90) + 10;
+
+  if (kind === BuildingKind.Residential) {
+    return `${district} ${residentialLabels[index % residentialLabels.length]} ${serial}`;
+  }
+  if (kind === BuildingKind.Commercial) {
+    return `${district} ${commercialLabels[index % commercialLabels.length]} ${serial}`;
+  }
+  return `${district} ${industrialLabels[index % industrialLabels.length]} ${serial}`;
+};
+
+const createDistrictBuildings = (
+  seed: number,
+  rng: () => number,
+  lots: LotCandidate[],
+  kind: BuildingKind,
+  count: number,
+  capacity: number,
+  stock: number,
+) =>
+  lots.slice(0, count).map(({ point }, index) => ({
+    id: `${kind.toLowerCase()}-${point.x}-${point.y}`,
+    kind,
+    tile: point,
+    stock,
+    capacity,
+    label: createBuildingLabel(seed, rng, kind, index),
+  }));
+
+const createAgentName = (rng: () => number) =>
+  `${firstNames[Math.floor(rng() * firstNames.length)]} ${lastNames[Math.floor(rng() * lastNames.length)]}`;
+
+export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
   const rng = createRng(seed);
   const tiles = Array.from({ length: STARTER_WORLD_WIDTH * STARTER_WORLD_HEIGHT }, (_, index) =>
     makeTile(index % STARTER_WORLD_WIDTH, Math.floor(index / STARTER_WORLD_WIDTH)),
   );
 
-  starterRoads.forEach(({ x, y }) => setTileType(tiles, x, y, TileType.Road));
+  for (let y = 0; y < STARTER_WORLD_HEIGHT; y += 1) {
+    for (let x = 0; x < STARTER_WORLD_WIDTH; x += 1) {
+      if (isRoadTile(x, y)) {
+        setTileType(tiles, x, y, TileType.Road);
+      }
+    }
+  }
 
-  const buildings: Building[] = starterBuildings.map((building) => ({
-    id: building.id,
-    kind: building.kind,
-    tile: { x: building.x, y: building.y },
-    stock: building.stock,
-    capacity: building.capacity,
-    label: building.label,
-  }));
+  const lots = buildLots(rng);
+  const residentialLots = pickLots(lots, residentialBuildingCount, scoreResidentialLot);
+  const commercialLots = pickLots(withoutSelectedLots(lots, residentialLots), commercialBuildingCount, scoreCommercialLot);
+  const industrialLots = pickLots(
+    withoutSelectedLots(withoutSelectedLots(lots, residentialLots), commercialLots),
+    industrialBuildingCount,
+    scoreIndustrialLot,
+  );
+
+  const buildings: Building[] = [
+    ...createDistrictBuildings(
+      seed,
+      rng,
+      residentialLots,
+      BuildingKind.Residential,
+      residentialBuildingCount,
+      STARTER_RESIDENTIAL_CAPACITY,
+      0,
+    ),
+    ...createDistrictBuildings(
+      seed,
+      rng,
+      commercialLots,
+      BuildingKind.Commercial,
+      commercialBuildingCount,
+      STARTER_COMMERCIAL_CAPACITY,
+      STARTER_COMMERCIAL_CAPACITY,
+    ),
+    ...createDistrictBuildings(
+      seed,
+      rng,
+      industrialLots,
+      BuildingKind.Industrial,
+      industrialBuildingCount,
+      STARTER_INDUSTRIAL_CAPACITY,
+      STARTER_INDUSTRIAL_CAPACITY + 4,
+    ),
+  ];
 
   buildings.forEach((building) => {
     const tileType =
@@ -83,12 +213,18 @@ export const createStarterWorld = (seed = 7): WorldState => {
 
   const homes = buildings.filter((building) => building.kind === BuildingKind.Residential);
   const workplaces = buildings.filter((building) => building.kind === BuildingKind.Industrial);
+  const homeSlots = homes.flatMap((home) => Array.from({ length: home.capacity }, () => home));
 
-  const agents = homes.map((home, index) => {
+  if (homeSlots.length < STARTER_POPULATION) {
+    throw new Error('Starter world does not provide enough housing capacity.');
+  }
+
+  const agents = Array.from({ length: STARTER_POPULATION }, (_, index) => {
+    const home = homeSlots[index]!;
     const workId = workplaces[index % workplaces.length].id;
     return {
       id: `agent-${index + 1}`,
-      name: agentNames[index % agentNames.length],
+      name: createAgentName(rng),
       pos: { x: home.tile.x + 0.5, y: home.tile.y + 0.5 },
       wallet: 20 + Math.floor(rng() * 20),
       stats: {

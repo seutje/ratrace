@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
+import { STARTER_WORLD_SEED } from '../sim/constants';
 import { TileType, BuildMode, BuildingKind, WorldState } from '../sim/types';
 import { createStarterWorld } from '../sim/world';
 import { getTile, pointToTile, setTile } from '../sim/utils';
@@ -51,7 +52,7 @@ export const useWorldStore = create<WorldStore>((set) => ({
   paused: false,
   buildMode: 'select',
   carryMs: 0,
-  bootstrap: (seed = 7) =>
+  bootstrap: (seed = STARTER_WORLD_SEED) =>
     set({
       world: createStarterWorld(seed),
       carryMs: 0,
