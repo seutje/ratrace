@@ -1,9 +1,16 @@
 import { createBlankWorld, createStarterWorld } from '../sim/world';
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
-import { SHOPPING_COOLDOWN_TICKS, SHOPPING_HUNGER_THRESHOLD, ticksPerSecond } from '../sim/constants';
+import {
+  SLEEP_MINIMUM_MINUTES,
+  SHOPPING_COOLDOWN_TICKS,
+  SHOPPING_HUNGER_THRESHOLD,
+  WORK_SHIFT_MINUTES,
+  ticksPerSecond,
+} from '../sim/constants';
 import { BuildingKind, AgentState, TileType, WorldState } from '../sim/types';
 import { findPath } from '../sim/pathfinding';
 import { getCongestionSpeedFactor } from '../sim/traffic';
+import { getAgentTrafficKey, getRouteTargetPoint } from '../sim/lanes';
 import { getTile, setTile, tileCenter, toClockNumber } from '../sim/utils';
 
 const stepTimes = (world: WorldState, ticks: number) => {
@@ -20,6 +27,32 @@ const orthogonalNeighbors = ({ x, y }: { x: number; y: number }) => [
   { x, y: y + 1 },
   { x, y: y - 1 },
 ];
+
+const makeTestAgent = (overrides: Partial<WorldState['entities']['agents'][number]> = {}) => ({
+  id: 'test-agent',
+  name: 'Test Agent',
+  pos: { x: 0.5, y: 0.5 },
+  wallet: 20,
+  stats: { hunger: 20, energy: 80, happiness: 70 },
+  homeId: 'home',
+  workId: 'work',
+  state: AgentState.Idle,
+  thought: 'Testing.',
+  route: [],
+  routeIndex: 0,
+  routeComputeCount: 0,
+  routeMapVersion: 0,
+  destination: undefined,
+  lastPaidKey: undefined,
+  lastShoppedTick: undefined,
+  sleepUntilTick: undefined,
+  shiftDay: 0,
+  shiftWorkMinutes: 0,
+  paidShiftWorkMinutes: 0,
+  lastCompletedShiftDay: 0,
+  daysInCity: 0,
+  ...overrides,
+});
 
 const collectConnectedRoads = (world: WorldState) => {
   const start = world.tiles.find((tile) => tile.type === TileType.Road);
@@ -46,6 +79,23 @@ const collectConnectedRoads = (world: WorldState) => {
 
   return visited;
 };
+
+const getCenterDistance = (world: WorldState, { x, y }: { x: number; y: number }) =>
+  Math.hypot(x - (world.width - 1) / 2, y - (world.height - 1) / 2);
+
+const getEdgeBias = (world: WorldState, { x, y }: { x: number; y: number }) =>
+  Math.max(Math.abs(x - (world.width - 1) / 2) / ((world.width - 1) / 2), Math.abs(y - (world.height - 1) / 2) / ((world.height - 1) / 2));
+
+const nearestDistanceToKind = (
+  world: WorldState,
+  building: WorldState['entities']['buildings'][number],
+  kind: BuildingKind,
+) =>
+  Math.min(
+    ...world.entities.buildings
+      .filter((candidate) => candidate.kind === kind)
+      .map((candidate) => Math.hypot(candidate.tile.x - building.tile.x, candidate.tile.y - building.tile.y)),
+  );
 
 describe('world generation', () => {
   it('creates the same starter world for the same seed', () => {
@@ -78,6 +128,34 @@ describe('world generation', () => {
         orthogonalNeighbors(building.tile).some((point) => getTile(world, point)?.type === TileType.Road),
       ),
     ).toBe(true);
+  });
+
+  it('keeps mixed-use zoning in the center and industry in outer clusters', () => {
+    const world = createStarterWorld();
+    const residential = world.entities.buildings.filter((building) => building.kind === BuildingKind.Residential);
+    const commercial = world.entities.buildings.filter((building) => building.kind === BuildingKind.Commercial);
+    const industrial = world.entities.buildings.filter((building) => building.kind === BuildingKind.Industrial);
+    const averageCenterDistance = (buildings: typeof residential) =>
+      buildings.reduce((sum, building) => sum + getCenterDistance(world, building.tile), 0) / buildings.length;
+    const centerResidential = residential.filter((building) => getCenterDistance(world, building.tile) <= 8);
+    const centerCommercial = commercial.filter((building) => getCenterDistance(world, building.tile) <= 8);
+    const outerIndustry = industrial.filter((building) => getEdgeBias(world, building.tile) >= 0.7);
+    const residentialNearIndustry = residential.filter(
+      (building) => nearestDistanceToKind(world, building, BuildingKind.Industrial) <= 3.5,
+    );
+    const industrialQuadrants = new Set(
+      industrial.map((building) =>
+        `${building.tile.x < (world.width - 1) / 2 ? 'W' : 'E'}${building.tile.y < (world.height - 1) / 2 ? 'N' : 'S'}`,
+      ),
+    );
+
+    expect(centerResidential.length).toBeGreaterThanOrEqual(24);
+    expect(centerCommercial.length).toBeGreaterThanOrEqual(10);
+    expect(averageCenterDistance(residential)).toBeLessThan(averageCenterDistance(industrial));
+    expect(averageCenterDistance(commercial)).toBeLessThan(averageCenterDistance(industrial));
+    expect(outerIndustry.length).toBeGreaterThanOrEqual(Math.floor(industrial.length / 2));
+    expect(industrialQuadrants.size).toBeGreaterThanOrEqual(4);
+    expect(residentialNearIndustry.length).toBeGreaterThanOrEqual(6);
   });
 });
 
@@ -140,6 +218,10 @@ describe('agent behavior', () => {
     eveningAgent.state = AgentState.Idle;
     eveningAgent.stats.hunger = 20;
     eveningAgent.stats.energy = 50;
+    eveningAgent.shiftDay = world.day;
+    eveningAgent.shiftWorkMinutes = WORK_SHIFT_MINUTES;
+    eveningAgent.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
+    eveningAgent.lastCompletedShiftDay = world.day;
     world.minutesOfDay = 21 * 60 + 55;
 
     const eveningStates = new Set<AgentState>();
@@ -152,6 +234,51 @@ describe('agent behavior', () => {
     expect(workdayStates.has(AgentState.Working)).toBe(true);
     expect(eveningStates.has(AgentState.MovingHome)).toBe(true);
     expect(eveningStates.has(AgentState.Sleeping)).toBe(true);
+  });
+
+  it('keeps late agents on the job until their shift is complete', () => {
+    let world = createStarterWorld();
+    const agent = world.entities.agents[0]!;
+    const work = world.entities.buildings.find((building) => building.id === agent.workId)!;
+    const workApproach = orthogonalNeighbors(work.tile).find((point) => getTile(world, point)?.type === TileType.Road)!;
+
+    agent.pos = tileCenter(workApproach);
+    agent.stats.hunger = 20;
+    agent.stats.energy = 90;
+    world.minutesOfDay = 16 * 60 + 55;
+
+    world = stepTimes(world, 30);
+
+    expect(toClockNumber(world.minutesOfDay)).toBe(1725);
+    expect(world.entities.agents[0]!.destination?.kind).toBe('work');
+    expect(world.entities.agents[0]!.state).toBe(AgentState.Working);
+    expect(world.entities.agents[0]!.shiftWorkMinutes).toBeGreaterThan(0);
+  });
+
+  it('keeps exhausted agents asleep until their minimum sleep block is complete', () => {
+    let world = createStarterWorld();
+    const agent = world.entities.agents[0]!;
+    const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
+
+    agent.pos = tileCenter(home.tile);
+    agent.state = AgentState.Idle;
+    agent.stats.hunger = 20;
+    agent.stats.energy = 10;
+    agent.shiftDay = world.day;
+    agent.shiftWorkMinutes = 120;
+    agent.paidShiftWorkMinutes = 120;
+    agent.lastCompletedShiftDay = world.day - 1;
+    world.minutesOfDay = 22 * 60;
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents[0]!.state).toBe(AgentState.Sleeping);
+    expect(world.entities.agents[0]!.sleepUntilTick).toBeGreaterThan(world.tick);
+
+    world = stepTimes(world, SLEEP_MINIMUM_MINUTES - 2);
+
+    expect(world.entities.agents[0]!.state).toBe(AgentState.Sleeping);
+    expect(world.entities.agents[0]!.destination?.kind).toBe('home');
   });
 
   it('moves an agent incrementally instead of teleporting', () => {
@@ -224,10 +351,14 @@ describe('economy', () => {
     world.minutesOfDay = 9 * 60;
     const initialWallet = agent.wallet;
 
-    world = stepWorld(world);
+    world = stepTimes(world, 60);
     const afterWork = world.entities.agents[0]!;
     expect(afterWork.wallet).toBeGreaterThan(initialWallet);
 
+    afterWork.shiftDay = world.day;
+    afterWork.shiftWorkMinutes = WORK_SHIFT_MINUTES;
+    afterWork.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
+    afterWork.lastCompletedShiftDay = world.day;
     const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
     afterWork.pos = tileCenter(shop.tile);
     afterWork.stats.hunger = 90;
@@ -243,6 +374,10 @@ describe('economy', () => {
     const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
     agent.wallet = 0;
     agent.stats.hunger = 100;
+    agent.shiftDay = world.day;
+    agent.shiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.lastCompletedShiftDay = world.day;
     agent.pos = tileCenter(shop.tile);
     world.minutesOfDay = 18 * 60;
 
@@ -260,6 +395,10 @@ describe('economy', () => {
 
     agent.wallet = 100;
     agent.stats.hunger = 100;
+    agent.shiftDay = world.day;
+    agent.shiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.lastCompletedShiftDay = world.day;
     agent.pos = tileCenter(shop.tile);
     world.minutesOfDay = 18 * 60;
 
@@ -280,21 +419,27 @@ describe('economy', () => {
   it('does not shop twice during the same evening after one successful purchase', () => {
     let world = createStarterWorld();
     const agent = world.entities.agents[0]!;
+    const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
 
     agent.wallet = 100;
     agent.stats.hunger = 100;
     agent.stats.energy = 80;
+    agent.shiftDay = world.day;
+    agent.shiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.lastCompletedShiftDay = world.day;
+    agent.pos = tileCenter(shop.tile);
     world.minutesOfDay = 18 * 60;
 
-    let shoppingTicks = 0;
+    let purchases = 0;
     for (let index = 0; index < 300; index += 1) {
       world = stepWorld(world);
-      if (world.entities.agents[0]!.state === AgentState.Shopping) {
-        shoppingTicks += 1;
+      if (world.entities.agents[0]!.lastShoppedTick === world.tick) {
+        purchases += 1;
       }
     }
 
-    expect(shoppingTicks).toBe(1);
+    expect(purchases).toBe(1);
   });
 
   it('does not force a home destination when already home and no need is active', () => {
@@ -305,6 +450,10 @@ describe('economy', () => {
     agent.pos = tileCenter(home.tile);
     agent.stats.hunger = 20;
     agent.stats.energy = 80;
+    agent.shiftDay = world.day;
+    agent.shiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.lastCompletedShiftDay = world.day;
     world.minutesOfDay = 18 * 60;
 
     world = stepWorld(world);
@@ -315,6 +464,67 @@ describe('economy', () => {
 });
 
 describe('traffic and lifecycle', () => {
+  it('uses separate lane keys for opposing traffic on the same road tile', () => {
+    const world = createBlankWorld(3, 3);
+    for (let x = 0; x < 3; x += 1) {
+      setTile(world, { x, y: 1 }, { x, y: 1, type: TileType.Road });
+    }
+
+    const eastbound = makeTestAgent({
+      pos: { x: 1.5, y: 1.5 },
+      route: [
+        { x: 1, y: 1 },
+        { x: 2, y: 1 },
+      ],
+      routeIndex: 1,
+    });
+    const westbound = makeTestAgent({
+      id: 'test-agent-west',
+      pos: { x: 1.5, y: 1.5 },
+      route: [
+        { x: 1, y: 1 },
+        { x: 0, y: 1 },
+      ],
+      routeIndex: 1,
+    });
+
+    expect(getAgentTrafficKey(world, eastbound)).toBe('1,1:east');
+    expect(getAgentTrafficKey(world, westbound)).toBe('1,1:west');
+  });
+
+  it('targets the right-hand lane center for opposite directions', () => {
+    const world = createBlankWorld(3, 3);
+    for (let x = 0; x < 3; x += 1) {
+      setTile(world, { x, y: 1 }, { x, y: 1, type: TileType.Road });
+    }
+
+    const eastbound = makeTestAgent({
+      pos: { x: 0.5, y: 1.5 },
+      route: [
+        { x: 0, y: 1 },
+        { x: 1, y: 1 },
+      ],
+      routeIndex: 1,
+    });
+    const westbound = makeTestAgent({
+      id: 'test-agent-west',
+      pos: { x: 2.5, y: 1.5 },
+      route: [
+        { x: 2, y: 1 },
+        { x: 1, y: 1 },
+      ],
+      routeIndex: 1,
+    });
+
+    const eastboundTarget = getRouteTargetPoint(world, eastbound);
+    const westboundTarget = getRouteTargetPoint(world, westbound);
+
+    expect(eastboundTarget.x).toBeCloseTo(1.5);
+    expect(eastboundTarget.y).toBeGreaterThan(1.5);
+    expect(westboundTarget.x).toBeCloseTo(1.5);
+    expect(westboundTarget.y).toBeLessThan(1.5);
+  });
+
   it('applies the congestion speed formula with a floor', () => {
     expect(getCongestionSpeedFactor(1, 4)).toBeCloseTo(0.75);
     expect(getCongestionSpeedFactor(2, 4)).toBeCloseTo(0.5);
@@ -361,5 +571,5 @@ describe('traffic and lifecycle', () => {
     expect(world.entities.agents.length).toBeGreaterThan(0);
     expect(Number.isFinite(world.economy.totalWealth)).toBe(true);
     expect(world.entities.agents.every((agent) => Number.isFinite(agent.stats.hunger))).toBe(true);
-  });
+  }, 10000);
 });

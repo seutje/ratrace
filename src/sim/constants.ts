@@ -4,9 +4,12 @@ export const msPerTick = 1000 / ticksPerSecond;
 export const dayMinutes = 24 * 60;
 
 export const WORK_START_MINUTE = 9 * 60;
-export const WORK_END_MINUTE = 17 * 60;
+export const WORK_SHIFT_MINUTES = 8 * 60;
 export const SLEEP_START_MINUTE = 22 * 60;
 export const SLEEP_END_MINUTE = 6 * 60;
+export const SLEEP_MINIMUM_MINUTES = 6 * 60;
+export const SLEEP_TARGET_ENERGY = 85;
+export const SLEEP_ENERGY_RECOVERY_PER_TICK = 0.45;
 
 export const BASE_MOVE_SPEED = 0.1;
 export const ROAD_SPEED_MULTIPLIER = 2;

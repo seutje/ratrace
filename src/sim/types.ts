@@ -80,6 +80,11 @@ export type Agent = {
   destination?: AgentDestination;
   lastPaidKey?: string;
   lastShoppedTick?: number;
+  sleepUntilTick?: number;
+  shiftDay: number;
+  shiftWorkMinutes: number;
+  paidShiftWorkMinutes: number;
+  lastCompletedShiftDay: number;
   daysInCity: number;
 };
 

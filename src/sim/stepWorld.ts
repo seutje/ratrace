@@ -10,10 +10,13 @@ import {
   SHOPPING_HUNGER_THRESHOLD,
   SHOP_PRICE,
   SLEEP_END_MINUTE,
+  SLEEP_ENERGY_RECOVERY_PER_TICK,
+  SLEEP_MINIMUM_MINUTES,
+  SLEEP_TARGET_ENERGY,
   SLEEP_ENERGY_THRESHOLD,
   SLEEP_START_MINUTE,
-  WORK_END_MINUTE,
   WORK_START_MINUTE,
+  WORK_SHIFT_MINUTES,
   dayMinutes,
   gameMinutesPerTick,
   msPerTick,
@@ -38,13 +41,21 @@ import {
   getTile,
   pointToTile,
   samePoint,
-  tileCenter,
-  tileKey,
   toClockNumber,
 } from './utils';
+import { getAgentTrafficKey, getRouteTargetPoint } from './lanes';
 
-const isWorkHours = (minutes: number) => minutes >= WORK_START_MINUTE && minutes < WORK_END_MINUTE;
+const isPastWorkStart = (minutes: number) => minutes >= WORK_START_MINUTE;
 const isSleepHours = (minutes: number) => minutes >= SLEEP_START_MINUTE || minutes < SLEEP_END_MINUTE;
+const hasActiveShift = (agent: Agent) => agent.shiftDay > 0 && agent.shiftWorkMinutes < WORK_SHIFT_MINUTES;
+const isCommittedToSleep = (agent: Agent, world: WorldState) =>
+  agent.sleepUntilTick !== undefined && world.tick < agent.sleepUntilTick;
+const getRequiredSleepTicks = (agent: Agent) => {
+  const minimumSleepTicks = Math.ceil(SLEEP_MINIMUM_MINUTES / gameMinutesPerTick);
+  const missingEnergy = Math.max(0, SLEEP_TARGET_ENERGY - agent.stats.energy);
+  const energyRecoveryTicks = Math.ceil(missingEnergy / SLEEP_ENERGY_RECOVERY_PER_TICK);
+  return Math.max(minimumSleepTicks, energyRecoveryTicks);
+};
 
 const getBuilding = (world: WorldState, buildingId: string) =>
   world.entities.buildings.find((building) => building.id === buildingId);
@@ -56,7 +67,9 @@ const computeTraffic = (world: WorldState) => {
   const traffic: Record<string, number> = {};
 
   world.entities.agents.forEach((agent) => {
-    const key = tileKey(pointToTile(agent.pos));
+    const currentTile = pointToTile(agent.pos);
+    const currentTileType = getTile(world, currentTile)?.type ?? TileType.Empty;
+    const key = getAgentTrafficKey(world, agent, currentTile, currentTileType);
     traffic[key] = (traffic[key] ?? 0) + 1;
   });
 
@@ -109,12 +122,12 @@ const moveAgent = (world: WorldState, agent: Agent) => {
 
   const currentTile = pointToTile(agent.pos);
   const currentTileType = getTile(world, currentTile)?.type ?? TileType.Empty;
-  const occupancy = world.traffic[tileKey(currentTile)] ?? 0;
+  const occupancy = world.traffic[getAgentTrafficKey(world, agent, currentTile, currentTileType)] ?? 0;
   const congestionFactor = currentTileType === TileType.Road ? getCongestionSpeedFactor(occupancy) : 1;
   const roadMultiplier = currentTileType === TileType.Road ? ROAD_SPEED_MULTIPLIER : 1;
   const stepDistance = BASE_MOVE_SPEED * roadMultiplier * congestionFactor;
 
-  const target = tileCenter(agent.route[agent.routeIndex]);
+  const target = getRouteTargetPoint(world, agent, currentTile);
   const remainingDistance = distance(agent.pos, target);
 
   if (remainingDistance <= stepDistance) {
@@ -130,25 +143,65 @@ const moveAgent = (world: WorldState, agent: Agent) => {
   };
 };
 
-const arriveAtBuilding = (agent: Agent, building: Building, world: WorldState) => {
-  const timeKey = `${world.day}-${Math.floor(world.minutesOfDay / 60)}`;
+const activateShiftIfDue = (world: WorldState, agent: Agent) => {
+  const shouldStartShift =
+    isPastWorkStart(world.minutesOfDay) && agent.shiftDay < world.day && agent.lastCompletedShiftDay < world.day;
 
+  if (!shouldStartShift) {
+    return;
+  }
+
+  agent.shiftDay = world.day;
+  agent.shiftWorkMinutes = 0;
+  agent.paidShiftWorkMinutes = 0;
+};
+
+const recordShiftWork = (agent: Agent, building: Building, world: WorldState) => {
+  if (!hasActiveShift(agent)) {
+    return;
+  }
+
+  agent.state = AgentState.Working;
+  agent.thought = 'Clocked in.';
+  agent.shiftWorkMinutes = Math.min(agent.shiftWorkMinutes + gameMinutesPerTick, WORK_SHIFT_MINUTES);
+
+  while (agent.shiftWorkMinutes - agent.paidShiftWorkMinutes >= 60) {
+    agent.wallet += HOURLY_WAGE;
+    building.stock += INDUSTRIAL_OUTPUT_PER_HOUR;
+    world.economy.treasury = Math.max(0, world.economy.treasury - HOURLY_WAGE);
+    agent.paidShiftWorkMinutes += 60;
+  }
+
+  if (agent.shiftWorkMinutes >= WORK_SHIFT_MINUTES) {
+    agent.lastCompletedShiftDay = world.day;
+    agent.thought = 'Shift done.';
+  }
+};
+
+const arriveAtBuilding = (agent: Agent, building: Building, world: WorldState) => {
   switch (building.kind) {
-    case BuildingKind.Residential:
-      agent.state = isSleepHours(world.minutesOfDay) ? AgentState.Sleeping : AgentState.Idle;
-      agent.thought = agent.state === AgentState.Sleeping ? 'Finally, a bed.' : 'Home for a minute.';
-      break;
-    case BuildingKind.Industrial:
-      if (isWorkHours(world.minutesOfDay)) {
-        agent.state = AgentState.Working;
-        agent.thought = 'Clocked in.';
-        if (agent.lastPaidKey !== timeKey) {
-          agent.wallet += HOURLY_WAGE;
-          building.stock += INDUSTRIAL_OUTPUT_PER_HOUR;
-          world.economy.treasury = Math.max(0, world.economy.treasury - HOURLY_WAGE);
-          agent.lastPaidKey = timeKey;
+    case BuildingKind.Residential: {
+      const committedToSleep = isCommittedToSleep(agent, world);
+      const shouldContinueSleeping =
+        agent.state === AgentState.Sleeping && (committedToSleep || isSleepHours(world.minutesOfDay));
+      const shouldStartSleepBlock = agent.stats.energy <= SLEEP_ENERGY_THRESHOLD || isSleepHours(world.minutesOfDay);
+
+      if (shouldContinueSleeping || shouldStartSleepBlock) {
+        if (!committedToSleep && agent.state !== AgentState.Sleeping) {
+          agent.sleepUntilTick = world.tick + getRequiredSleepTicks(agent);
         }
+        agent.state = AgentState.Sleeping;
+        agent.thought = 'Finally, a bed.';
+        break;
       }
+
+      agent.sleepUntilTick = undefined;
+      agent.state = AgentState.Idle;
+      agent.thought = 'Home for a minute.';
+      break;
+    }
+    case BuildingKind.Industrial:
+      recordShiftWork(agent, building, world);
       break;
     case BuildingKind.Commercial:
       if (
@@ -176,7 +229,11 @@ const updateAgentStats = (agent: Agent) => {
   const shopping = agent.state === AgentState.Shopping;
 
   agent.stats.hunger = clamp(agent.stats.hunger + (sleeping ? 0.03 : 0.09), 0, MAX_STAT);
-  agent.stats.energy = clamp(agent.stats.energy + (sleeping ? 0.45 : working ? -0.08 : -0.04), 0, MAX_STAT);
+  agent.stats.energy = clamp(
+    agent.stats.energy + (sleeping ? SLEEP_ENERGY_RECOVERY_PER_TICK : working ? -0.08 : -0.04),
+    0,
+    MAX_STAT,
+  );
   agent.stats.happiness = clamp(
     100 - agent.stats.hunger * 0.45 - (MAX_STAT - agent.stats.energy) * 0.35 + (shopping ? 5 : 0),
     0,
@@ -215,12 +272,21 @@ const determineDestination = (world: WorldState, agent: Agent): AgentDestination
   const tile = pointToTile(agent.pos);
   const shoppingCooldownElapsed =
     agent.lastShoppedTick === undefined || world.tick - agent.lastShoppedTick >= SHOPPING_COOLDOWN_TICKS;
+  const sleepingAtHome =
+    home &&
+    isOnBuildingTile(agent, home) &&
+    agent.state === AgentState.Sleeping &&
+    (isCommittedToSleep(agent, world) || isSleepHours(world.minutesOfDay));
+
+  if (sleepingAtHome) {
+    return { buildingId: home.id, kind: 'home' };
+  }
 
   if (agent.stats.energy <= SLEEP_ENERGY_THRESHOLD && home) {
     return { buildingId: home.id, kind: 'home' };
   }
 
-  if (isWorkHours(world.minutesOfDay) && work) {
+  if (hasActiveShift(agent) && work) {
     return { buildingId: work.id, kind: 'work' };
   }
 
@@ -266,6 +332,7 @@ const applyDestinationState = (agent: Agent, destination?: AgentDestination) => 
 };
 
 const routeAgent = (world: WorldState, agent: Agent) => {
+  activateShiftIfDue(world, agent);
   const destination = determineDestination(world, agent);
   if (!destination) {
     agent.destination = undefined;
@@ -378,6 +445,11 @@ const runPopulationTurnover = (world: WorldState) => {
         destination: undefined,
         lastPaidKey: undefined,
         lastShoppedTick: undefined,
+        sleepUntilTick: undefined,
+        shiftDay: 0,
+        shiftWorkMinutes: 0,
+        paidShiftWorkMinutes: 0,
+        lastCompletedShiftDay: 0,
         daysInCity: 0,
       });
     }

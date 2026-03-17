@@ -22,6 +22,16 @@ type LotCandidate = {
   variation: number;
 };
 
+type NormalizedPoint = {
+  x: number;
+  y: number;
+};
+
+type ClusterPlan = {
+  center: NormalizedPoint;
+  count: number;
+};
+
 const setTileType = (tiles: Tile[], x: number, y: number, type: TileType) => {
   tiles[y * STARTER_WORLD_WIDTH + x] = { ...tiles[y * STARTER_WORLD_WIDTH + x], type };
 };
@@ -35,6 +45,20 @@ const lastNames = ['Ash', 'Bell', 'Cinder', 'Dune', 'Elm', 'Flint', 'Grove', 'Ha
 const residentialLabels = ['Court', 'House', 'Heights', 'Terrace', 'Square', 'Row'];
 const commercialLabels = ['Market', 'Corner', 'Arcade', 'Exchange', 'Mart', 'Bazaar'];
 const industrialLabels = ['Works', 'Yard', 'Foundry', 'Depot', 'Mill', 'Plant'];
+const industrialClusterPlans: ClusterPlan[] = [
+  { center: { x: 0.14, y: 0.2 }, count: 4 },
+  { center: { x: 0.84, y: 0.2 }, count: 4 },
+  { center: { x: 0.18, y: 0.78 }, count: 4 },
+  { center: { x: 0.82, y: 0.74 }, count: industrialBuildingCount - 12 },
+];
+const residentialPocketPlans: ClusterPlan[] = [
+  { center: industrialClusterPlans[0]!.center, count: 2 },
+  { center: industrialClusterPlans[1]!.center, count: 2 },
+  { center: industrialClusterPlans[2]!.center, count: 2 },
+  { center: industrialClusterPlans[3]!.center, count: 2 },
+];
+const residentialPocketCount = residentialPocketPlans.reduce((sum, cluster) => sum + cluster.count, 0);
+const centralResidentialCount = residentialBuildingCount - residentialPocketCount;
 
 const isRoadTile = (x: number, y: number) =>
   x === 0 ||
@@ -66,22 +90,51 @@ const buildLots = (rng: () => number) => {
   return lots;
 };
 
-const scoreResidentialLot = ({ point, variation }: LotCandidate) => {
-  const nx = point.x / (STARTER_WORLD_WIDTH - 1);
-  const ny = point.y / (STARTER_WORLD_HEIGHT - 1);
-  return (1 - nx) * 1.1 + (1 - ny) * 0.35 + variation * 0.45;
+const normalizePoint = ({ x, y }: Point): NormalizedPoint => ({
+  x: x / (STARTER_WORLD_WIDTH - 1),
+  y: y / (STARTER_WORLD_HEIGHT - 1),
+});
+
+const getCenterDistance = ({ x, y }: NormalizedPoint) => Math.hypot(x - 0.5, y - 0.5);
+
+const getEdgeBias = ({ x, y }: NormalizedPoint) => Math.max(Math.abs(x - 0.5) / 0.5, Math.abs(y - 0.5) / 0.5);
+
+const getAxisBias = ({ x, y }: NormalizedPoint) => 1 - Math.min(Math.abs(x - 0.5), Math.abs(y - 0.5)) / 0.5;
+
+const getClusterInfluence = (
+  { x, y }: NormalizedPoint,
+  center: NormalizedPoint,
+  spreadX: number,
+  spreadY: number,
+) => {
+  const dx = (x - center.x) / spreadX;
+  const dy = (y - center.y) / spreadY;
+  return Math.max(0, 1 - Math.hypot(dx, dy));
+};
+
+const scoreCentralResidentialLot = ({ point, variation }: LotCandidate) => {
+  const normalized = normalizePoint(point);
+  const centerBias = Math.max(0, 1 - getCenterDistance(normalized) / 0.65);
+  return centerBias * 1.4 + getAxisBias(normalized) * 0.3 + variation * 0.2;
 };
 
 const scoreCommercialLot = ({ point, variation }: LotCandidate) => {
-  const nx = point.x / (STARTER_WORLD_WIDTH - 1);
-  const ny = point.y / (STARTER_WORLD_HEIGHT - 1);
-  return 1.4 - Math.abs(nx - 0.48) * 1.8 - Math.abs(ny - 0.35) * 1.5 + variation * 0.5;
+  const normalized = normalizePoint(point);
+  const centerBias = Math.max(0, 1 - getCenterDistance(normalized) / 0.48);
+  return centerBias * 1.7 + getAxisBias(normalized) * 0.45 + variation * 0.15;
 };
 
-const scoreIndustrialLot = ({ point, variation }: LotCandidate) => {
-  const nx = point.x / (STARTER_WORLD_WIDTH - 1);
-  const ny = point.y / (STARTER_WORLD_HEIGHT - 1);
-  return nx * 0.95 + ny * 0.9 + variation * 0.45;
+const scoreResidentialPocketLot = (lot: LotCandidate, cluster: ClusterPlan) => {
+  const normalized = normalizePoint(lot.point);
+  const clusterBias = getClusterInfluence(normalized, cluster.center, 0.18, 0.18);
+  return clusterBias * 1.6 + getEdgeBias(normalized) * 0.25 + lot.variation * 0.15;
+};
+
+const scoreIndustrialLot = (lot: LotCandidate, cluster: ClusterPlan) => {
+  const normalized = normalizePoint(lot.point);
+  const clusterBias = getClusterInfluence(normalized, cluster.center, 0.22, 0.2);
+  const centerPenalty = getCenterDistance(normalized);
+  return clusterBias * 2 + getEdgeBias(normalized) * 0.5 - centerPenalty * 0.4 + lot.variation * 0.12;
 };
 
 const pickLots = (
@@ -102,6 +155,29 @@ const pickLots = (
 const withoutSelectedLots = (lots: LotCandidate[], selected: LotCandidate[]) => {
   const taken = new Set(selected.map(({ point }) => `${point.x},${point.y}`));
   return lots.filter(({ point }) => !taken.has(`${point.x},${point.y}`));
+};
+
+const pickClusterLots = (
+  lots: LotCandidate[],
+  clusters: ClusterPlan[],
+  scoreLot: (lot: LotCandidate, cluster: ClusterPlan) => number,
+  fallbackScoreLot: (lot: LotCandidate) => number,
+) => {
+  let remaining = lots;
+  const selected: LotCandidate[] = [];
+
+  clusters.forEach((cluster) => {
+    const clusterSelection = pickLots(remaining, cluster.count, (lot) => scoreLot(lot, cluster));
+    selected.push(...clusterSelection);
+    remaining = withoutSelectedLots(remaining, clusterSelection);
+  });
+
+  const totalCount = clusters.reduce((sum, cluster) => sum + cluster.count, 0);
+  if (selected.length < totalCount) {
+    selected.push(...pickLots(remaining, totalCount - selected.length, fallbackScoreLot));
+  }
+
+  return selected;
 };
 
 const createBuildingLabel = (
@@ -158,13 +234,25 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
   }
 
   const lots = buildLots(rng);
-  const residentialLots = pickLots(lots, residentialBuildingCount, scoreResidentialLot);
-  const commercialLots = pickLots(withoutSelectedLots(lots, residentialLots), commercialBuildingCount, scoreCommercialLot);
-  const industrialLots = pickLots(
-    withoutSelectedLots(withoutSelectedLots(lots, residentialLots), commercialLots),
-    industrialBuildingCount,
+  const industrialLots = pickClusterLots(
+    lots,
+    industrialClusterPlans,
     scoreIndustrialLot,
+    (lot) => industrialClusterPlans.reduce((best, cluster) => Math.max(best, scoreIndustrialLot(lot, cluster)), -Infinity),
   );
+  const lotsWithoutIndustry = withoutSelectedLots(lots, industrialLots);
+  const commercialLots = pickLots(lotsWithoutIndustry, commercialBuildingCount, scoreCommercialLot);
+  const lotsWithoutCommercial = withoutSelectedLots(lotsWithoutIndustry, commercialLots);
+  const residentialPocketLots = pickClusterLots(
+    lotsWithoutCommercial,
+    residentialPocketPlans,
+    scoreResidentialPocketLot,
+    scoreCentralResidentialLot,
+  );
+  const residentialLots = [
+    ...pickLots(withoutSelectedLots(lotsWithoutCommercial, residentialPocketLots), centralResidentialCount, scoreCentralResidentialLot),
+    ...residentialPocketLots,
+  ];
 
   const buildings: Building[] = [
     ...createDistrictBuildings(
@@ -243,6 +331,11 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
       destination: undefined,
       lastPaidKey: undefined,
       lastShoppedTick: undefined,
+      sleepUntilTick: undefined,
+      shiftDay: 0,
+      shiftWorkMinutes: 0,
+      paidShiftWorkMinutes: 0,
+      lastCompletedShiftDay: 0,
       daysInCity: 0,
     };
   });
