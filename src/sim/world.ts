@@ -238,7 +238,7 @@ const createDistrictBuildings = (
       tile: point,
       stock,
       capacity,
-      pantryStock: kind === BuildingKind.Residential ? capacity : 0,
+      pantryStock: pantryCapacity,
       pantryCapacity,
       label: createBuildingLabel(seed, rng, kind, index),
     };
@@ -347,6 +347,7 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
       name: createAgentName(rng),
       pos: { x: home.tile.x + 0.5, y: home.tile.y + 0.5 },
       wallet: 20 + Math.floor(rng() * 20),
+      carriedMeals: 0,
       stats: {
         hunger: Math.floor(15 + rng() * 20),
         energy: Math.floor(55 + rng() * 25),

@@ -2,9 +2,10 @@ import {
   BASE_MOVE_SPEED,
   COMMERCIAL_RESTOCK_PER_HOUR,
   HOURLY_WAGE,
-  PANTRY_MEAL_HUNGER_RECOVERY,
   INDUSTRIAL_OUTPUT_PER_HOUR,
   MAX_STAT,
+  PACKED_LUNCH_CAPACITY,
+  PANTRY_MEAL_HUNGER_RECOVERY,
   ROAD_SPEED_MULTIPLIER,
   SHOPPING_COOLDOWN_TICKS,
   SHOPPING_BASKET_UNITS,
@@ -201,7 +202,7 @@ const getRequiredSleepTicks = (agent: Agent) => {
 };
 
 const getBuilding = (buildingIndex: StepBuildingIndex, buildingId: string) => buildingIndex.byId.get(buildingId);
-const getHomePantryReorderPoint = (home: Building) => Math.max(1, Math.floor(home.pantryCapacity / 3));
+const getHomePantryReorderPoint = (home: Building) => Math.max(2, Math.floor(home.pantryCapacity / 2));
 const homeNeedsPantryRefill = (home?: Building) =>
   !!home && home.pantryStock < home.pantryCapacity && home.pantryStock <= getHomePantryReorderPoint(home);
 
@@ -239,9 +240,11 @@ const updateEconomyTotals = (world: WorldState) => {
   let walletTotal = 0;
   let stockTotal = 0;
   let pantryTotal = 0;
+  let carriedMealTotal = 0;
 
   for (const agent of world.entities.agents) {
     walletTotal += agent.wallet;
+    carriedMealTotal += agent.carriedMeals;
   }
 
   for (const building of world.entities.buildings) {
@@ -249,8 +252,8 @@ const updateEconomyTotals = (world: WorldState) => {
     pantryTotal += building.pantryStock;
   }
 
-  world.economy.supplyStock = stockTotal + pantryTotal;
-  world.economy.totalWealth = world.economy.treasury + walletTotal + (stockTotal + pantryTotal) * 2;
+  world.economy.supplyStock = stockTotal + pantryTotal + carriedMealTotal;
+  world.economy.totalWealth = world.economy.treasury + walletTotal + (stockTotal + pantryTotal + carriedMealTotal) * 2;
 };
 
 const assignRoute = (world: WorldState, agent: Agent, destination: AgentDestination, targetPoint: Point) => {
@@ -427,6 +430,33 @@ const consumePantryMeal = (agent: Agent, home: Building) => {
   return true;
 };
 
+const consumePackedLunch = (agent: Agent) => {
+  if (agent.carriedMeals <= 0 || agent.stats.hunger < SHOPPING_HUNGER_THRESHOLD) {
+    return false;
+  }
+
+  agent.carriedMeals -= 1;
+  agent.stats.hunger = clamp(agent.stats.hunger - PANTRY_MEAL_HUNGER_RECOVERY, 0, MAX_STAT);
+  agent.stats.happiness = clamp(agent.stats.happiness + 4, 0, MAX_STAT);
+  agent.thought = 'Ate packed lunch.';
+  return true;
+};
+
+const packLunchFromHome = (agent: Agent, home: Building) => {
+  if (home.pantryStock <= 0 || agent.carriedMeals >= PACKED_LUNCH_CAPACITY) {
+    return false;
+  }
+
+  const packedMeals = Math.min(PACKED_LUNCH_CAPACITY - agent.carriedMeals, home.pantryStock);
+  if (packedMeals <= 0) {
+    return false;
+  }
+
+  home.pantryStock -= packedMeals;
+  agent.carriedMeals += packedMeals;
+  return true;
+};
+
 const arriveAtBuilding = (agent: Agent, building: Building, buildingIndex: StepBuildingIndex, world: WorldState) => {
   if (agent.destination?.kind === 'work' && building.id === agent.workId) {
     recordShiftWork(agent, building, world);
@@ -576,7 +606,8 @@ const determineDestination = (world: WorldState, buildingIndex: StepBuildingInde
     return { buildingId: work.id, kind: 'work' };
   }
 
-  const emergencyFoodRun = agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && (home?.pantryStock ?? 0) <= 0;
+  const emergencyFoodRun =
+    agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && agent.carriedMeals <= 0 && (home?.pantryStock ?? 0) <= 0;
   const pantryRunFromHome =
     !!home &&
     homeNeedsPantryRefill(home) &&
@@ -630,6 +661,9 @@ const routeAgent = (
 ) => {
   activateShiftIfDue(world, agent);
   const home = getBuilding(buildingIndex, agent.homeId);
+  if (home && !isOnBuildingTile(agent, home)) {
+    consumePackedLunch(agent);
+  }
   const destination = determineDestination(world, buildingIndex, agent);
   if (!destination) {
     if (home && isOnBuildingTile(agent, home) && agent.state !== AgentState.Sleeping) {
@@ -652,6 +686,10 @@ const routeAgent = (
   }
 
   const currentTile = getAgentCurrentTile(agent);
+  if (destination.kind === 'work' && home && currentTile.x === home.tile.x && currentTile.y === home.tile.y) {
+    packLunchFromHome(agent, home);
+  }
+
   if (currentTile.x === building.tile.x && currentTile.y === building.tile.y) {
     agent.destination = destination;
     agent.route = [];
@@ -748,6 +786,7 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
         name: `Newcomer ${world.day}`,
         pos: { x: home.tile.x + 0.5, y: home.tile.y + 0.5 },
         wallet: 18,
+        carriedMeals: 0,
         stats: { hunger: 24, energy: 72, happiness: 64 },
         homeId: home.id,
         workId: assignment.workId,

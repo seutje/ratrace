@@ -53,6 +53,10 @@ export const Inspector = () => {
               <dd>${agent.wallet}</dd>
             </div>
             <div>
+              <dt>Lunches</dt>
+              <dd>{agent.carriedMeals}</dd>
+            </div>
+            <div>
               <dt>Hunger</dt>
               <dd>{agent.stats.hunger.toFixed(1)}</dd>
             </div>

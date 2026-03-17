@@ -70,6 +70,7 @@ export type Agent = {
   name: string;
   pos: Point;
   wallet: number;
+  carriedMeals: number;
   stats: AgentStats;
   homeId: string;
   workId: string;

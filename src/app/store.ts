@@ -139,7 +139,7 @@ export const useWorldStore = create<WorldStore>((set) => ({
           tile: point,
           stock: buildingKind === BuildingKind.Commercial ? 4 : buildingKind === BuildingKind.Industrial ? 2 : 0,
           capacity: buildingKind === BuildingKind.Residential ? 2 : 4,
-          pantryStock: buildingKind === BuildingKind.Residential ? 2 : 0,
+          pantryStock: buildingKind === BuildingKind.Residential ? 2 * HOME_PANTRY_UNITS_PER_RESIDENT : 0,
           pantryCapacity: buildingKind === BuildingKind.Residential ? 2 * HOME_PANTRY_UNITS_PER_RESIDENT : 0,
           label: `${buildingKind.toLowerCase()}-${x}-${y}`,
         });
