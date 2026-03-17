@@ -78,7 +78,6 @@ export type Agent = {
   routeComputeCount: number;
   routeMapVersion: number;
   destination?: AgentDestination;
-  lastPaidKey?: string;
   lastShoppedTick?: number;
   sleepUntilTick?: number;
   shiftDay: number;
@@ -109,7 +108,6 @@ export type WorldState = {
   entities: {
     agents: Agent[];
     buildings: Building[];
-    paths: Point[][];
   };
   selectedAgentId?: string;
   traffic: TrafficMap;

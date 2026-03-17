@@ -43,7 +43,6 @@ const makeTestAgent = (overrides: Partial<WorldState['entities']['agents'][numbe
   routeComputeCount: 0,
   routeMapVersion: 0,
   destination: undefined,
-  lastPaidKey: undefined,
   lastShoppedTick: undefined,
   sleepUntilTick: undefined,
   shiftDay: 0,

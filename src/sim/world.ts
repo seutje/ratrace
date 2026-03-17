@@ -329,7 +329,6 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
       routeComputeCount: 0,
       routeMapVersion: 0,
       destination: undefined,
-      lastPaidKey: undefined,
       lastShoppedTick: undefined,
       sleepUntilTick: undefined,
       shiftDay: 0,
@@ -360,7 +359,6 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
     entities: {
       agents,
       buildings,
-      paths: [],
     },
     selectedAgentId: undefined,
     traffic: {},
@@ -390,7 +388,6 @@ export const createBlankWorld = (width: number, height: number): WorldState => (
   entities: {
     agents: [],
     buildings: [],
-    paths: [],
   },
   traffic: {},
   metrics: {

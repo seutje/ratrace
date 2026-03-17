@@ -111,7 +111,6 @@ const assignRoute = (world: WorldState, agent: Agent, destination: AgentDestinat
   agent.routeIndex = Math.min(1, Math.max(path.length - 1, 0));
   agent.routeComputeCount += 1;
   agent.routeMapVersion = world.metrics.mapVersion;
-  world.entities.paths = world.entities.agents.map((entry) => (entry.id === agent.id ? path : entry.route));
   world.metrics.pathComputations += 1;
 };
 
@@ -403,7 +402,6 @@ const runPopulationTurnover = (world: WorldState) => {
     agent.daysInCity += 1;
   });
 
-  const before = world.entities.agents.length;
   world.entities.agents = world.entities.agents.filter(
     (agent) =>
       !(
@@ -443,7 +441,6 @@ const runPopulationTurnover = (world: WorldState) => {
         routeComputeCount: 0,
         routeMapVersion: world.metrics.mapVersion,
         destination: undefined,
-        lastPaidKey: undefined,
         lastShoppedTick: undefined,
         sleepUntilTick: undefined,
         shiftDay: 0,
@@ -456,9 +453,6 @@ const runPopulationTurnover = (world: WorldState) => {
   }
 
   world.metrics.populationCapacity = capacity;
-  if (before !== world.entities.agents.length) {
-    world.entities.paths = world.entities.agents.map((agent) => agent.route);
-  }
 };
 
 export const stepWorld = (inputWorld: WorldState): WorldState => {
