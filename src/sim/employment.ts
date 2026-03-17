@@ -10,7 +10,7 @@ export type JobAssignment = {
   workId: string;
 };
 
-export const COMMERCIAL_WORKER_SHARE = 0.1;
+export const COMMERCIAL_WORKER_SHARE = 0.18;
 export const INDUSTRIAL_SHIFT_PROFILES: ShiftProfile[] = [
   { share: 0.6, startMinute: 8 * 60 },
   { share: 0.25, startMinute: 12 * 60 },

@@ -514,13 +514,14 @@ describe('economy', () => {
     agent.stats.energy = 80;
     agent.carriedMeals = 0;
     home.pantryStock = home.pantryCapacity;
+    world.entities.agents = [agent];
     world.minutesOfDay = agent.shiftStartMinute;
 
     world = stepWorld(world);
 
     const commutingAgent = world.entities.agents[0]!;
-    expect(commutingAgent.carriedMeals).toBeGreaterThan(0);
-    expect(world.entities.buildings.find((building) => building.id === home.id)!.pantryStock).toBeLessThan(home.pantryCapacity);
+    expect(commutingAgent.carriedMeals).toBe(1);
+    expect(world.entities.buildings.find((building) => building.id === home.id)!.pantryStock).toBe(home.pantryCapacity - 1);
 
     commutingAgent.pos = tileCenter(work.tile);
     commutingAgent.stats.hunger = 100;
@@ -535,6 +536,24 @@ describe('economy', () => {
     expect(world.entities.agents[0]!.carriedMeals).toBeLessThan(commutingAgent.carriedMeals);
     expect(world.entities.agents[0]!.stats.hunger).toBeLessThan(SHOPPING_HUNGER_THRESHOLD);
     expect(world.entities.agents[0]!.state).toBe(AgentState.Working);
+  });
+
+  it('does not pack a lunch when the pantry is already near the refill threshold', () => {
+    let world = createStarterWorld();
+    const agent = world.entities.agents[0]!;
+    const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
+
+    agent.pos = tileCenter(home.tile);
+    agent.stats.hunger = 20;
+    agent.stats.energy = 80;
+    agent.carriedMeals = 0;
+    home.pantryStock = Math.ceil(home.pantryCapacity * 0.75);
+    world.minutesOfDay = agent.shiftStartMinute;
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents[0]!.carriedMeals).toBe(0);
+    expect(world.entities.buildings.find((building) => building.id === home.id)!.pantryStock).toBe(home.pantryStock);
   });
 
   it('does not immediately pick another shopping trip after a purchase', () => {
@@ -600,6 +619,9 @@ describe('economy', () => {
     let world = createStarterWorld();
     const agent = world.entities.agents[0]!;
     const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
+    const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
+
+    ensureStaffedShop(world, shop);
 
     agent.pos = tileCenter(home.tile);
     agent.wallet = 100;
@@ -609,13 +631,47 @@ describe('economy', () => {
     agent.shiftWorkMinutes = WORK_SHIFT_MINUTES;
     agent.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
     agent.lastCompletedShiftDay = world.day;
-    home.pantryStock = 1;
+    home.pantryStock = Math.ceil(home.pantryCapacity * 0.75);
     world.minutesOfDay = 18 * 60;
 
     world = stepWorld(world);
 
     expect(world.entities.agents[0]!.destination?.kind).toBe('shop');
     expect(world.entities.agents[0]!.state).toBe(AgentState.MovingToShop);
+  });
+
+  it('targets the nearest staffed shop instead of a closer closed one', () => {
+    let world = createStarterWorld();
+    const customer = world.entities.agents[0]!;
+    const home = world.entities.buildings.find((building) => building.id === customer.homeId)!;
+    const shops = world.entities.buildings
+      .filter((building) => building.kind === BuildingKind.Commercial)
+      .sort(
+        (left, right) =>
+          Math.abs(left.tile.x - home.tile.x) +
+          Math.abs(left.tile.y - home.tile.y) -
+          (Math.abs(right.tile.x - home.tile.x) + Math.abs(right.tile.y - home.tile.y)),
+      );
+    const closedShop = shops[0]!;
+    const staffedShop = shops.find((shop) => shop.id !== closedShop.id)!;
+    const clerk = ensureStaffedShop(world, staffedShop);
+
+    customer.pos = tileCenter(home.tile);
+    customer.wallet = 100;
+    customer.stats.hunger = 100;
+    customer.stats.energy = 80;
+    customer.shiftDay = world.day;
+    customer.shiftWorkMinutes = WORK_SHIFT_MINUTES;
+    customer.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
+    customer.lastCompletedShiftDay = world.day;
+    home.pantryStock = 0;
+    world.entities.agents = [customer, clerk];
+    world.minutesOfDay = 18 * 60;
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents[0]!.destination).toEqual({ buildingId: staffedShop.id, kind: 'shop' });
+    expect(world.entities.agents[0]!.destination?.buildingId).not.toBe(closedShop.id);
   });
 
   it('keeps a pantry refill trip targeted at the shop after leaving home', () => {
@@ -625,6 +681,7 @@ describe('economy', () => {
     const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
     const homeApproach = orthogonalNeighbors(home.tile).find((point) => getTile(world, point)?.type === TileType.Road)!;
 
+    ensureStaffedShop(world, shop);
     agent.pos = tileCenter(homeApproach);
     agent.wallet = 100;
     agent.stats.hunger = 20;

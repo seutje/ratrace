@@ -202,7 +202,7 @@ const getRequiredSleepTicks = (agent: Agent) => {
 };
 
 const getBuilding = (buildingIndex: StepBuildingIndex, buildingId: string) => buildingIndex.byId.get(buildingId);
-const getHomePantryReorderPoint = (home: Building) => Math.max(2, Math.floor(home.pantryCapacity / 2));
+const getHomePantryReorderPoint = (home: Building) => Math.max(2, Math.ceil(home.pantryCapacity * 0.75));
 const homeNeedsPantryRefill = (home?: Building) =>
   !!home && home.pantryStock < home.pantryCapacity && home.pantryStock <= getHomePantryReorderPoint(home);
 
@@ -443,11 +443,15 @@ const consumePackedLunch = (agent: Agent) => {
 };
 
 const packLunchFromHome = (agent: Agent, home: Building) => {
-  if (home.pantryStock <= 0 || agent.carriedMeals >= PACKED_LUNCH_CAPACITY) {
+  if (
+    home.pantryStock <= 0 ||
+    home.pantryStock <= getHomePantryReorderPoint(home) ||
+    agent.carriedMeals >= PACKED_LUNCH_CAPACITY
+  ) {
     return false;
   }
 
-  const packedMeals = Math.min(PACKED_LUNCH_CAPACITY - agent.carriedMeals, home.pantryStock);
+  const packedMeals = Math.min(PACKED_LUNCH_CAPACITY - agent.carriedMeals, 1, home.pantryStock - getHomePantryReorderPoint(home));
   if (packedMeals <= 0) {
     return false;
   }
@@ -582,6 +586,9 @@ const hasStaffedCommercialWorker = (world: WorldState, building: Building) =>
     (agent) => agent.workId === building.id && isOnBuildingTile(agent, building) && (hasActiveShift(agent) || isShiftDue(world, agent)),
   );
 
+const canServeShopper = (world: WorldState, building: Building) =>
+  building.kind === BuildingKind.Commercial && building.stock > 0 && hasStaffedCommercialWorker(world, building);
+
 const determineDestination = (world: WorldState, buildingIndex: StepBuildingIndex, agent: Agent): AgentDestination | undefined => {
   const home = getBuilding(buildingIndex, agent.homeId);
   const work = getBuilding(buildingIndex, agent.workId);
@@ -613,7 +620,7 @@ const determineDestination = (world: WorldState, buildingIndex: StepBuildingInde
     homeNeedsPantryRefill(home) &&
     (isOnBuildingTile(agent, home) || agent.destination?.kind === 'shop');
   if ((emergencyFoodRun || pantryRunFromHome) && agent.wallet >= SHOP_PRICE && shoppingCooldownElapsed) {
-    const shop = nearestBuilding(buildingIndex, tile, BuildingKind.Commercial, (building) => building.stock > 0);
+    const shop = nearestBuilding(buildingIndex, tile, BuildingKind.Commercial, (building) => canServeShopper(world, building));
     if (shop) {
       return { buildingId: shop.id, kind: 'shop' };
     }
