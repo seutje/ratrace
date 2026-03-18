@@ -21,6 +21,7 @@ describe('App', () => {
   it('updates the visible zoom level when controls are used', () => {
     render(<App />);
 
+    fireEvent.click(screen.getByRole('button', { name: 'Show' }));
     fireEvent.click(screen.getByRole('button', { name: '+' }));
     expect(screen.getByText('200%')).toBeInTheDocument();
 

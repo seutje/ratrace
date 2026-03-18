@@ -8,6 +8,11 @@ export type Viewport = {
   height: number;
 };
 
+type PanOffset = {
+  x: number;
+  y: number;
+};
+
 export const DEFAULT_ZOOM = 1;
 export const MIN_ZOOM = 0.125;
 export const MAX_ZOOM = 4;
@@ -37,6 +42,7 @@ export const calculateViewport = (
   width: number,
   height: number,
   zoom = 1,
+  pan: PanOffset = { x: 0, y: 0 },
 ): Viewport => {
   const fittedTileSize = Math.max(1, Math.floor(Math.min(width / world.width, height / world.height)));
   const tileSize = Math.max(1, Math.floor(fittedTileSize * zoom));
@@ -45,8 +51,8 @@ export const calculateViewport = (
 
   return {
     tileSize,
-    offsetX: Math.floor((width - usedWidth) / 2),
-    offsetY: Math.floor((height - usedHeight) / 2),
+    offsetX: Math.floor((width - usedWidth) / 2 + pan.x),
+    offsetY: Math.floor((height - usedHeight) / 2 + pan.y),
     width,
     height,
   };
