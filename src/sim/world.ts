@@ -66,9 +66,6 @@ const setTileType = (tiles: Tile[], x: number, y: number, type: TileType) => {
   tiles[y * STARTER_WORLD_WIDTH + x] = { ...tiles[y * STARTER_WORLD_WIDTH + x], type };
 };
 
-const residentialBuildingCount = Math.ceil(STARTER_POPULATION / STARTER_RESIDENTIAL_CAPACITY);
-const commercialBuildingCount = Math.max(12, Math.ceil(STARTER_POPULATION / 14));
-const industrialBuildingCount = Math.max(16, Math.ceil(STARTER_POPULATION / 12));
 const createClusterPlans = (centers: NormalizedPoint[], totalCount: number): ClusterPlan[] => {
   if (totalCount <= 0) {
     return [];
@@ -84,14 +81,24 @@ const createClusterPlans = (centers: NormalizedPoint[], totalCount: number): Clu
   }));
 };
 
-const residentialPocketCount = Math.min(
-  residentialBuildingCount,
-  Math.max(industrialClusterCenters.length * 2, Math.round(residentialBuildingCount * 0.12)),
-);
+const createStarterBuildingPlan = (population: number) => {
+  const residentialBuildingCount = Math.ceil(population / STARTER_RESIDENTIAL_CAPACITY);
+  const commercialBuildingCount = Math.max(12, Math.ceil(population / 14));
+  const industrialBuildingCount = Math.max(16, Math.ceil(population / 12));
+  const residentialPocketCount = Math.min(
+    residentialBuildingCount,
+    Math.max(industrialClusterCenters.length * 2, Math.round(residentialBuildingCount * 0.12)),
+  );
 
-const industrialClusterPlans = createClusterPlans(industrialClusterCenters, industrialBuildingCount);
-const residentialPocketPlans = createClusterPlans(industrialClusterCenters, residentialPocketCount);
-const centralResidentialCount = residentialBuildingCount - residentialPocketCount;
+  return {
+    residentialBuildingCount,
+    commercialBuildingCount,
+    industrialBuildingCount,
+    industrialClusterPlans: createClusterPlans(industrialClusterCenters, industrialBuildingCount),
+    residentialPocketPlans: createClusterPlans(industrialClusterCenters, residentialPocketCount),
+    centralResidentialCount: residentialBuildingCount - residentialPocketCount,
+  };
+};
 
 const isRoadTile = (x: number, y: number) =>
   x === 0 ||
@@ -237,8 +244,16 @@ const createDistrictBuildings = (
     };
   });
 
-export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
+export const createStarterWorld = (seed = STARTER_WORLD_SEED, population = STARTER_POPULATION): WorldState => {
   const rng = createRng(seed);
+  const {
+    residentialBuildingCount,
+    commercialBuildingCount,
+    industrialBuildingCount,
+    industrialClusterPlans,
+    residentialPocketPlans,
+    centralResidentialCount,
+  } = createStarterBuildingPlan(population);
   const tiles = Array.from({ length: STARTER_WORLD_WIDTH * STARTER_WORLD_HEIGHT }, (_, index) =>
     makeTile(index % STARTER_WORLD_WIDTH, Math.floor(index / STARTER_WORLD_WIDTH)),
   );
@@ -319,17 +334,17 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED): WorldState => {
 
   const homes = buildings.filter((building) => building.kind === BuildingKind.Residential);
   const homeSlots = homes.flatMap((home) => Array.from({ length: home.capacity }, () => home));
-  const employmentAssignments = createEmploymentAssignments(STARTER_POPULATION, buildings);
+  const employmentAssignments = createEmploymentAssignments(population, buildings);
 
-  if (homeSlots.length < STARTER_POPULATION) {
+  if (homeSlots.length < population) {
     throw new Error('Starter world does not provide enough housing capacity.');
   }
 
-  if (employmentAssignments.length < STARTER_POPULATION) {
+  if (employmentAssignments.length < population) {
     throw new Error('Starter world does not provide enough workplaces.');
   }
 
-  const agents = Array.from({ length: STARTER_POPULATION }, (_, index) => {
+  const agents = Array.from({ length: population }, (_, index) => {
     const home = homeSlots[index]!;
     const assignment = employmentAssignments[index]!;
     return {
