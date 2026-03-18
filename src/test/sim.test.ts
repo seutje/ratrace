@@ -756,7 +756,32 @@ describe('economy', () => {
     );
   });
 
-  it('packs lunches before work and consumes them away from home', () => {
+  it('packs a lunch whenever an awake agent is home with pantry food', () => {
+    let world = createTestStarterWorld();
+    const agent = world.entities.agents[0]!;
+    const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
+
+    agent.pos = tileCenter(home.tile);
+    agent.wallet = 0;
+    agent.stats.hunger = 20;
+    agent.stats.energy = 80;
+    agent.carriedMeals = 0;
+    agent.shiftDay = world.day;
+    agent.shiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
+    agent.lastCompletedShiftDay = world.day;
+    home.pantryStock = 1;
+    world.entities.agents = [agent];
+    world.minutesOfDay = 18 * 60;
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents[0]!.carriedMeals).toBe(1);
+    expect(world.entities.buildings.find((building) => building.id === home.id)!.pantryStock).toBe(0);
+    expect(world.entities.agents[0]!.state).toBe(AgentState.Idle);
+  });
+
+  it('holds a packed lunch until hunger reaches 100, then consumes it away from home', () => {
     let world = createTestStarterWorld();
     const agent = world.entities.agents[0]!;
     const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
@@ -772,10 +797,24 @@ describe('economy', () => {
 
     world = stepWorld(world);
 
-    const commutingAgent = world.entities.agents[0]!;
+    let commutingAgent = world.entities.agents[0]!;
     expect(commutingAgent.carriedMeals).toBe(1);
     expect(world.entities.buildings.find((building) => building.id === home.id)!.pantryStock).toBe(home.pantryCapacity - 1);
 
+    commutingAgent.pos = tileCenter(work.tile);
+    commutingAgent.stats.hunger = 99;
+    commutingAgent.shiftDay = world.day;
+    commutingAgent.shiftWorkMinutes = 0;
+    commutingAgent.paidShiftWorkMinutes = 0;
+    commutingAgent.route = [];
+    commutingAgent.routeIndex = 0;
+    commutingAgent.destination = { buildingId: work.id, kind: 'work' };
+    world = stepWorld(world);
+
+    expect(world.entities.agents[0]!.carriedMeals).toBe(1);
+    expect(world.entities.agents[0]!.stats.hunger).toBeLessThan(100);
+
+    commutingAgent = world.entities.agents[0]!;
     commutingAgent.pos = tileCenter(work.tile);
     commutingAgent.stats.hunger = 100;
     commutingAgent.shiftDay = world.day;
@@ -791,22 +830,25 @@ describe('economy', () => {
     expect(world.entities.agents[0]!.state).toBe(AgentState.Working);
   });
 
-  it('does not pack a lunch when the pantry is already near the refill threshold', () => {
+  it('does not consume a packed lunch while sleeping', () => {
     let world = createTestStarterWorld();
     const agent = world.entities.agents[0]!;
     const home = world.entities.buildings.find((building) => building.id === agent.homeId)!;
 
     agent.pos = tileCenter(home.tile);
-    agent.stats.hunger = 20;
-    agent.stats.energy = 80;
-    agent.carriedMeals = 0;
-    home.pantryStock = Math.ceil(home.pantryCapacity * 0.75);
-    world.minutesOfDay = agent.shiftStartMinute;
+    agent.stats.hunger = 100;
+    agent.stats.energy = 10;
+    agent.carriedMeals = 1;
+    home.pantryStock = 0;
+    agent.state = AgentState.Sleeping;
+    agent.sleepUntilTick = world.tick + 10;
+    world.minutesOfDay = 23 * 60;
 
     world = stepWorld(world);
 
-    expect(world.entities.agents[0]!.carriedMeals).toBe(0);
-    expect(world.entities.buildings.find((building) => building.id === home.id)!.pantryStock).toBe(home.pantryStock);
+    expect(world.entities.agents[0]!.carriedMeals).toBe(1);
+    expect(world.entities.agents[0]!.state).toBe(AgentState.Sleeping);
+    expect(world.entities.agents[0]!.stats.hunger).toBe(100);
   });
 
   it('does not immediately pick another shopping trip after a purchase', () => {

@@ -455,7 +455,7 @@ const consumePantryMeal = (agent: Agent, home: Building) => {
 };
 
 const consumePackedLunch = (agent: Agent) => {
-  if (agent.carriedMeals <= 0 || agent.stats.hunger < SHOPPING_HUNGER_THRESHOLD) {
+  if (agent.carriedMeals <= 0 || agent.stats.hunger < MAX_STAT) {
     return false;
   }
 
@@ -467,15 +467,11 @@ const consumePackedLunch = (agent: Agent) => {
 };
 
 const packLunchFromHome = (agent: Agent, home: Building) => {
-  if (
-    home.pantryStock <= 0 ||
-    home.pantryStock <= getHomePantryReorderPoint(home) ||
-    agent.carriedMeals >= PACKED_LUNCH_CAPACITY
-  ) {
+  if (home.pantryStock <= 0 || agent.carriedMeals >= PACKED_LUNCH_CAPACITY) {
     return false;
   }
 
-  const packedMeals = Math.min(PACKED_LUNCH_CAPACITY - agent.carriedMeals, 1, home.pantryStock - getHomePantryReorderPoint(home));
+  const packedMeals = Math.min(PACKED_LUNCH_CAPACITY - agent.carriedMeals, 1, home.pantryStock);
   if (packedMeals <= 0) {
     return false;
   }
@@ -757,8 +753,15 @@ const routeAgent = (
   const staffedBefore = getStaffedCommercialBuildingId(world, buildingIndex, agent);
   activateShiftIfDue(world, agent);
   const home = getBuilding(buildingIndex, agent.homeId);
-  if (home && !isOnBuildingTile(agent, home)) {
+  const homeTile = home && isOnBuildingTile(agent, home);
+  if (agent.state !== AgentState.Sleeping) {
+    if (homeTile) {
+      packLunchFromHome(agent, home);
+    }
     consumePackedLunch(agent);
+    if (homeTile) {
+      packLunchFromHome(agent, home);
+    }
   }
   const destination = determineDestination(world, buildingIndex, staffedCommercialCounts, agent);
   if (!destination) {
@@ -791,10 +794,6 @@ const routeAgent = (
   }
 
   const currentTile = getAgentCurrentTile(agent);
-  if (destination.kind === 'work' && home && currentTile.x === home.tile.x && currentTile.y === home.tile.y) {
-    packLunchFromHome(agent, home);
-  }
-
   if (currentTile.x === building.tile.x && currentTile.y === building.tile.y) {
     agent.destination = destination;
     agent.route = [];
