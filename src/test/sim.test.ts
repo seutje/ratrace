@@ -5,6 +5,7 @@ import { paintWorldTile } from '../sim/worldMutations';
 import {
   COMMERCIAL_STARTING_CASH,
   COMMERCIAL_SUBSIDY_PER_HOUR,
+  HOME_PANTRY_UNITS_PER_RESIDENT,
   HOUSEHOLD_GROWTH_COST,
   INDUSTRIAL_OUTPUT_PER_HOUR,
   INDUSTRIAL_STARTING_CASH,
@@ -16,6 +17,7 @@ import {
   SHOPPING_BASKET_UNITS,
   SHOPPING_COOLDOWN_TICKS,
   SHOPPING_HUNGER_THRESHOLD,
+  STARTER_RESIDENTIAL_CAPACITY,
   TREASURY_RESERVE_TARGET,
   WHOLESALE_PRICE_PER_UNIT,
   WORK_SHIFT_MINUTES,
@@ -236,6 +238,15 @@ describe('world generation', () => {
     expect(world.entities.buildings.find((building) => building.kind === BuildingKind.Industrial)?.label).toMatch(
       industrialLabelPattern,
     );
+  });
+
+  it('gives newly painted residential zones the starter home pantry size', () => {
+    const world = paintWorldTile(createBlankWorld(1, 1), 0, 0, TileType.Residential);
+    const home = world.entities.buildings.find((building) => building.kind === BuildingKind.Residential);
+
+    expect(home?.capacity).toBe(STARTER_RESIDENTIAL_CAPACITY);
+    expect(home?.pantryCapacity).toBe(STARTER_RESIDENTIAL_CAPACITY * HOME_PANTRY_UNITS_PER_RESIDENT);
+    expect(home?.pantryStock).toBe(STARTER_RESIDENTIAL_CAPACITY * HOME_PANTRY_UNITS_PER_RESIDENT);
   });
 });
 

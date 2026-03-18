@@ -1,4 +1,9 @@
-import { COMMERCIAL_STARTING_CASH, HOME_PANTRY_UNITS_PER_RESIDENT, INDUSTRIAL_STARTING_CASH } from './constants';
+import {
+  COMMERCIAL_STARTING_CASH,
+  HOME_PANTRY_UNITS_PER_RESIDENT,
+  INDUSTRIAL_STARTING_CASH,
+  STARTER_RESIDENTIAL_CAPACITY,
+} from './constants';
 import { pickEmploymentAssignment } from './employment';
 import { createRuntimeBuildingLabel } from './naming';
 import { BuildMode, BuildingKind, TileType, WorldState } from './types';
@@ -86,15 +91,16 @@ export const paintWorldTile = (sourceWorld: WorldState, x: number, y: number, mo
   const buildingKind = buildingKindForTile(nextType);
   if (buildingKind) {
     const buildingId = `build-${world.metrics.mapVersion + 1}-${x}-${y}`;
+    const residentialCapacity = STARTER_RESIDENTIAL_CAPACITY;
     world.entities.buildings.push({
       id: buildingId,
       kind: buildingKind,
       tile: point,
       cash: getStartingBuildingCash(buildingKind),
       stock: buildingKind === BuildingKind.Commercial ? 4 : buildingKind === BuildingKind.Industrial ? 2 : 0,
-      capacity: buildingKind === BuildingKind.Residential ? 2 : 4,
-      pantryStock: buildingKind === BuildingKind.Residential ? 2 * HOME_PANTRY_UNITS_PER_RESIDENT : 0,
-      pantryCapacity: buildingKind === BuildingKind.Residential ? 2 * HOME_PANTRY_UNITS_PER_RESIDENT : 0,
+      capacity: buildingKind === BuildingKind.Residential ? residentialCapacity : 4,
+      pantryStock: buildingKind === BuildingKind.Residential ? residentialCapacity * HOME_PANTRY_UNITS_PER_RESIDENT : 0,
+      pantryCapacity: buildingKind === BuildingKind.Residential ? residentialCapacity * HOME_PANTRY_UNITS_PER_RESIDENT : 0,
       label: createRuntimeBuildingLabel(world, buildingKind, point),
     });
     setTile(world, point, {
