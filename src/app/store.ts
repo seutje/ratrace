@@ -3,6 +3,8 @@ import { advanceWorld, stepWorld } from '../sim/stepWorld';
 import { MAX_FRAME_ADVANCE_MS, STARTER_WORLD_SEED } from '../sim/constants';
 import { BuildMode, OverlayMode, WorldState } from '../sim/types';
 import {
+  agentStateOrder,
+  CompactAgentFrame,
   DynamicAgentSnapshot,
   SimulationWorkerInboundMessage,
   SimulationWorkerOutboundMessage,
@@ -18,6 +20,7 @@ type WorldStore = {
   buildMode: BuildMode;
   overlayMode: OverlayMode;
   carryMs: number;
+  selectedAgentSnapshot?: DynamicAgentSnapshot;
   bootstrap: (seed?: number) => void;
   reset: () => void;
   setPaused: (paused: boolean) => void;
@@ -40,41 +43,79 @@ const postSimulationWorkerMessage = (message: SimulationWorkerInboundMessage) =>
   simulationWorker?.postMessage(message);
 };
 
+const agentStateByCode = agentStateOrder;
+
+const createCompactAgentFrame = (world: WorldState): CompactAgentFrame => {
+  const agentCount = world.entities.agents.length;
+  const posX = new Float32Array(agentCount);
+  const posY = new Float32Array(agentCount);
+  const hungerValues = new Float32Array(agentCount);
+  const energyValues = new Float32Array(agentCount);
+  const happinessValues = new Float32Array(agentCount);
+  const stateCodes = new Uint8Array(agentCount);
+
+  world.entities.agents.forEach((agent, index) => {
+    posX[index] = agent.pos.x;
+    posY[index] = agent.pos.y;
+    hungerValues[index] = agent.stats.hunger;
+    energyValues[index] = agent.stats.energy;
+    happinessValues[index] = agent.stats.happiness;
+    stateCodes[index] = Math.max(0, agentStateByCode.indexOf(agent.state));
+  });
+
+  return {
+    energyValues,
+    happinessValues,
+    hungerValues,
+    posX,
+    posY,
+    stateCodes,
+  };
+};
+
 const toDynamicSnapshot = (world: WorldState): WorldDynamicSnapshot => ({
   day: world.day,
   economy: { ...world.economy },
   entities: {
-    agents: world.entities.agents.map((agent) => ({
-      carriedMeals: agent.carriedMeals,
-      daysInCity: agent.daysInCity,
-      destination: agent.destination ? { ...agent.destination } : undefined,
-      homeId: agent.homeId,
-      id: agent.id,
-      keptMaxHungerToday: agent.keptMaxHungerToday,
-      lastCompletedShiftDay: agent.lastCompletedShiftDay,
-      lastShoppedTick: agent.lastShoppedTick,
-      maxHungerStreakDays: agent.maxHungerStreakDays,
-      name: agent.name,
-      paidShiftWorkMinutes: agent.paidShiftWorkMinutes,
-      pos: { ...agent.pos },
-      routeComputeCount: agent.routeComputeCount,
-      shiftDay: agent.shiftDay,
-      shiftStartMinute: agent.shiftStartMinute,
-      shiftWorkMinutes: agent.shiftWorkMinutes,
-      sleepUntilTick: agent.sleepUntilTick,
-      state: agent.state,
-      stats: { ...agent.stats },
-      thought: agent.thought,
-      wallet: agent.wallet,
-      workId: agent.workId,
-    })),
     buildings: world.entities.buildings.map((building) => ({
       ...building,
       tile: { ...building.tile },
     })),
   },
+  frame: createCompactAgentFrame(world),
   metrics: { ...world.metrics },
   minutesOfDay: world.minutesOfDay,
+  selectedAgent: world.selectedAgentId
+    ? (() => {
+        const agent = world.entities.agents.find((entry) => entry.id === world.selectedAgentId);
+        return agent
+          ? {
+              carriedMeals: agent.carriedMeals,
+              daysInCity: agent.daysInCity,
+              destination: agent.destination ? { ...agent.destination } : undefined,
+              homeId: agent.homeId,
+              id: agent.id,
+              keptMaxHungerToday: agent.keptMaxHungerToday,
+              lastCompletedShiftDay: agent.lastCompletedShiftDay,
+              lastShoppedTick: agent.lastShoppedTick,
+              maxHungerStreakDays: agent.maxHungerStreakDays,
+              name: agent.name,
+              paidShiftWorkMinutes: agent.paidShiftWorkMinutes,
+              pos: { ...agent.pos },
+              routeComputeCount: agent.routeComputeCount,
+              shiftDay: agent.shiftDay,
+              shiftStartMinute: agent.shiftStartMinute,
+              shiftWorkMinutes: agent.shiftWorkMinutes,
+              sleepUntilTick: agent.sleepUntilTick,
+              state: agent.state,
+              stats: { ...agent.stats },
+              thought: agent.thought,
+              wallet: agent.wallet,
+              workId: agent.workId,
+            }
+          : undefined;
+      })()
+    : undefined,
   selectedAgentId: world.selectedAgentId,
   tick: world.tick,
   traffic: { ...world.traffic },
@@ -86,48 +127,32 @@ const setRenderSnapshots = (nextSnapshot: WorldDynamicSnapshot) => {
   currentRenderSnapshotReceivedAtMs = nowMs();
 };
 
-const hydrateAgent = (
-  snapshot: DynamicAgentSnapshot,
-  previousAgent?: WorldState['entities']['agents'][number],
-): WorldState['entities']['agents'][number] => ({
-  carriedMeals: snapshot.carriedMeals,
-  daysInCity: snapshot.daysInCity,
-  destination: snapshot.destination ? { ...snapshot.destination } : undefined,
-  homeId: snapshot.homeId,
-  id: snapshot.id,
-  keptMaxHungerToday: snapshot.keptMaxHungerToday,
-  lastCompletedShiftDay: snapshot.lastCompletedShiftDay,
-  lastShoppedTick: snapshot.lastShoppedTick,
-  maxHungerStreakDays: snapshot.maxHungerStreakDays,
-  name: snapshot.name,
-  paidShiftWorkMinutes: snapshot.paidShiftWorkMinutes,
-  pos: { ...snapshot.pos },
-  route: previousAgent?.route ?? [],
-  routeComputeCount: snapshot.routeComputeCount,
-  routeIndex: previousAgent?.routeIndex ?? 0,
-  routeMapVersion: previousAgent?.routeMapVersion ?? 0,
-  shiftDay: snapshot.shiftDay,
-  shiftStartMinute: snapshot.shiftStartMinute,
-  shiftWorkMinutes: snapshot.shiftWorkMinutes,
-  sleepUntilTick: snapshot.sleepUntilTick,
-  state: snapshot.state,
-  stats: { ...snapshot.stats },
-  thought: snapshot.thought,
-  wallet: snapshot.wallet,
-  workId: snapshot.workId,
-});
+const applyCompactFrameToWorld = (world: WorldState, frame: CompactAgentFrame) => {
+  const agentCount = world.entities.agents.length;
+  if (agentCount !== frame.posX.length) {
+    throw new Error('Dynamic agent frame length does not match world agent count.');
+  }
+
+  for (let index = 0; index < agentCount; index += 1) {
+    const agent = world.entities.agents[index]!;
+    agent.pos.x = frame.posX[index]!;
+    agent.pos.y = frame.posY[index]!;
+    agent.stats.hunger = frame.hungerValues[index]!;
+    agent.stats.energy = frame.energyValues[index]!;
+    agent.stats.happiness = frame.happinessValues[index]!;
+    agent.state = agentStateByCode[frame.stateCodes[index]!] ?? agent.state;
+  }
+};
 
 const applyDynamicSnapshotToWorld = (world: WorldState, snapshot: WorldDynamicSnapshot): WorldState => {
-  const previousAgentsById = new Map(world.entities.agents.map((agent) => [agent.id, agent]));
+  applyCompactFrameToWorld(world, snapshot.frame);
 
   return {
     ...world,
     day: snapshot.day,
     economy: { ...snapshot.economy },
     entities: {
-      agents: snapshot.entities.agents.map((agent) =>
-        hydrateAgent(agent, previousAgentsById.get(agent.id)),
-      ),
+      agents: world.entities.agents,
       buildings: snapshot.entities.buildings.map((building) => ({
         ...building,
         tile: { ...building.tile },
@@ -148,6 +173,7 @@ const applyWorkerSnapshot = (message: SimulationWorkerOutboundMessage) => {
     useWorldStore.setState((state) => ({
       ...state,
       carryMs: 0,
+      selectedAgentSnapshot: snapshot.selectedAgent,
       world: message.world,
     }));
     return;
@@ -157,6 +183,7 @@ const applyWorkerSnapshot = (message: SimulationWorkerOutboundMessage) => {
   useWorldStore.setState((state) => ({
     ...state,
     carryMs: 0,
+    selectedAgentSnapshot: message.snapshot.selectedAgent,
     world: applyDynamicSnapshotToWorld(state.world, message.snapshot),
   }));
 };
@@ -205,10 +232,12 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
   buildMode: 'select',
   overlayMode: 'none',
   carryMs: 0,
+  selectedAgentSnapshot: undefined,
   bootstrap: (seed = STARTER_WORLD_SEED) => {
     if (simulationWorker) {
       set({
         paused: false,
+        selectedAgentSnapshot: undefined,
       });
       postSimulationWorkerMessage({
         type: 'bootstrap',
@@ -221,6 +250,7 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
       world: createStarterWorld(seed),
       carryMs: 0,
       paused: false,
+      selectedAgentSnapshot: undefined,
     });
     postSimulationWorkerMessage({
       type: 'bootstrap',
@@ -231,6 +261,7 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
     if (simulationWorker) {
       set({
         paused: false,
+        selectedAgentSnapshot: undefined,
       });
       postSimulationWorkerMessage({
         type: 'reset',
@@ -242,6 +273,7 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
       world: createStarterWorld(),
       paused: false,
       carryMs: 0,
+      selectedAgentSnapshot: undefined,
     });
     postSimulationWorkerMessage({
       type: 'reset',
@@ -301,6 +333,7 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
     }
 
     set((state) => ({
+      selectedAgentSnapshot: agentId === state.selectedAgentSnapshot?.id ? state.selectedAgentSnapshot : undefined,
       world: selectWorldAgent(state.world, agentId),
     }));
   },

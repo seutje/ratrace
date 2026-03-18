@@ -14,7 +14,12 @@ const stateColors: Record<AgentState, string> = {
 
 export const Inspector = () => {
   const selectedAgentId = useWorldStore((state) => state.world.selectedAgentId);
-  const agent = useWorldStore((state) => state.world.entities.agents.find((entry) => entry.id === selectedAgentId));
+  const selectedAgentSnapshot = useWorldStore((state) => state.selectedAgentSnapshot);
+  const agent = useWorldStore((state) =>
+    selectedAgentSnapshot?.id === selectedAgentId
+      ? selectedAgentSnapshot
+      : state.world.entities.agents.find((entry) => entry.id === selectedAgentId),
+  );
   const home = useWorldStore((state) => {
     if (!agent) {
       return undefined;

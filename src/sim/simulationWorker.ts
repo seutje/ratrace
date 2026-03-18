@@ -3,6 +3,8 @@
 import { STARTER_WORLD_SEED, msPerTick } from './constants';
 import { stepWorldInPlace } from './stepWorld';
 import {
+  agentStateOrder,
+  CompactAgentFrame,
   DynamicAgentSnapshot,
   SimulationWorkerInboundMessage,
   SimulationWorkerOutboundMessage,
@@ -14,6 +16,9 @@ import { createStarterWorld } from './world';
 let world = createStarterWorld();
 let paused = false;
 let tickTimer: number | null = null;
+let lastPublishedAgentCount = world.entities.agents.length;
+
+const agentStateCodeByValue = new Map(agentStateOrder.map((state, index) => [state, index]));
 
 const toDynamicAgentSnapshot = (agent: typeof world.entities.agents[number]): DynamicAgentSnapshot => ({
   carriedMeals: agent.carriedMeals,
@@ -40,7 +45,36 @@ const toDynamicAgentSnapshot = (agent: typeof world.entities.agents[number]): Dy
   routeComputeCount: agent.routeComputeCount,
 });
 
+const createCompactAgentFrame = (): CompactAgentFrame => {
+  const agentCount = world.entities.agents.length;
+  const posX = new Float32Array(agentCount);
+  const posY = new Float32Array(agentCount);
+  const hungerValues = new Float32Array(agentCount);
+  const energyValues = new Float32Array(agentCount);
+  const happinessValues = new Float32Array(agentCount);
+  const stateCodes = new Uint8Array(agentCount);
+
+  world.entities.agents.forEach((agent, index) => {
+    posX[index] = agent.pos.x;
+    posY[index] = agent.pos.y;
+    hungerValues[index] = agent.stats.hunger;
+    energyValues[index] = agent.stats.energy;
+    happinessValues[index] = agent.stats.happiness;
+    stateCodes[index] = agentStateCodeByValue.get(agent.state) ?? 0;
+  });
+
+  return {
+    energyValues,
+    happinessValues,
+    hungerValues,
+    posX,
+    posY,
+    stateCodes,
+  };
+};
+
 const publishFullSnapshot = () => {
+  lastPublishedAgentCount = world.entities.agents.length;
   const message: SimulationWorkerOutboundMessage = {
     type: 'fullSnapshot',
     world,
@@ -50,18 +84,29 @@ const publishFullSnapshot = () => {
 };
 
 const publishDynamicSnapshot = () => {
+  if (world.entities.agents.length !== lastPublishedAgentCount) {
+    publishFullSnapshot();
+    return;
+  }
+
+  const frame = createCompactAgentFrame();
+  const selectedAgent =
+    world.selectedAgentId !== undefined
+      ? world.entities.agents.find((agent) => agent.id === world.selectedAgentId)
+      : undefined;
   const snapshot: WorldDynamicSnapshot = {
     day: world.day,
     economy: { ...world.economy },
     entities: {
-      agents: world.entities.agents.map(toDynamicAgentSnapshot),
       buildings: world.entities.buildings.map((building) => ({
         ...building,
         tile: { ...building.tile },
       })),
     },
+    frame,
     metrics: { ...world.metrics },
     minutesOfDay: world.minutesOfDay,
+    selectedAgent: selectedAgent ? toDynamicAgentSnapshot(selectedAgent) : undefined,
     selectedAgentId: world.selectedAgentId,
     tick: world.tick,
     traffic: { ...world.traffic },
@@ -72,7 +117,14 @@ const publishDynamicSnapshot = () => {
     type: 'dynamicSnapshot',
   };
 
-  self.postMessage(message);
+  self.postMessage(message, [
+    frame.posX.buffer,
+    frame.posY.buffer,
+    frame.hungerValues.buffer,
+    frame.energyValues.buffer,
+    frame.happinessValues.buffer,
+    frame.stateCodes.buffer,
+  ]);
 };
 
 const stopTickLoop = () => {

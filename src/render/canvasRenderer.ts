@@ -1,5 +1,5 @@
 import { AgentState, BuildingKind, OverlayMode, TileType, WorldState } from '../sim/types';
-import { DynamicAgentSnapshot } from '../sim/simulationWorkerTypes';
+import { agentStateOrder, CompactAgentFrame } from '../sim/simulationWorkerTypes';
 
 export type Viewport = {
   tileSize: number;
@@ -37,6 +37,8 @@ const agentPalette: Record<AgentState, string> = {
   [AgentState.Shopping]: '#0e615f',
   [AgentState.Wandering]: '#694d2c',
 };
+
+const agentPaletteByCode = agentStateOrder.map((state) => agentPalette[state]);
 
 export const calculateViewport = (
   world: Pick<WorldState, 'width' | 'height'>,
@@ -262,7 +264,8 @@ export const renderDynamicWorld = (
   overlayMode: OverlayMode = 'none',
   interpolation?: {
     alpha: number;
-    previousAgents?: DynamicAgentSnapshot[];
+    currentFrame?: CompactAgentFrame;
+    previousFrame?: CompactAgentFrame;
   },
 ) => {
   ctx.lineWidth = 1;
@@ -270,21 +273,23 @@ export const renderDynamicWorld = (
   renderOverlay(ctx, world, viewport, overlayMode);
 
   for (const [index, agent] of world.entities.agents.entries()) {
-    const previousAgent = interpolation?.previousAgents?.[index];
-    const canInterpolate = previousAgent?.id === agent.id;
+    const currentFrame = interpolation?.currentFrame;
+    const previousFrame = interpolation?.previousFrame;
+    const canInterpolate =
+      Boolean(currentFrame && previousFrame && index < currentFrame.posX.length && index < previousFrame.posX.length);
     const interpolationAlpha = interpolation?.alpha ?? 1;
     const posX = canInterpolate
-      ? previousAgent.pos.x + (agent.pos.x - previousAgent.pos.x) * interpolationAlpha
+      ? previousFrame!.posX[index]! + (currentFrame!.posX[index]! - previousFrame!.posX[index]!) * interpolationAlpha
       : agent.pos.x;
     const posY = canInterpolate
-      ? previousAgent.pos.y + (agent.pos.y - previousAgent.pos.y) * interpolationAlpha
+      ? previousFrame!.posY[index]! + (currentFrame!.posY[index]! - previousFrame!.posY[index]!) * interpolationAlpha
       : agent.pos.y;
     const x = viewport.offsetX + posX * viewport.tileSize;
     const y = viewport.offsetY + posY * viewport.tileSize;
 
     ctx.beginPath();
     ctx.arc(x, y, viewport.tileSize * 0.2, 0, Math.PI * 2);
-    ctx.fillStyle = agentPalette[agent.state];
+    ctx.fillStyle = currentFrame ? agentPaletteByCode[currentFrame.stateCodes[index]!] ?? agentPalette[agent.state] : agentPalette[agent.state];
     ctx.fill();
 
     if (agent.id === world.selectedAgentId) {

@@ -165,7 +165,8 @@ export const App = () => {
 
       renderDynamicWorld(context, world, viewport, overlayMode, {
         alpha: interpolationAlpha,
-        previousAgents: previous?.entities.agents,
+        currentFrame: current?.frame,
+        previousFrame: previous?.frame,
       });
     };
 

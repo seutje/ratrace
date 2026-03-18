@@ -1,7 +1,8 @@
 import {
   Agent,
-  BuildMode,
+  AgentState,
   Building,
+  BuildMode,
   Economy,
   TrafficMap,
   WorldMetrics,
@@ -12,15 +13,36 @@ export type DynamicAgentSnapshot = Omit<Agent, 'route' | 'routeIndex' | 'routeMa
 
 export type DynamicBuildingSnapshot = Building;
 
+export const agentStateOrder = [
+  AgentState.Idle,
+  AgentState.MovingToWork,
+  AgentState.Working,
+  AgentState.MovingHome,
+  AgentState.Sleeping,
+  AgentState.MovingToShop,
+  AgentState.Shopping,
+  AgentState.Wandering,
+] as const;
+
+export type CompactAgentFrame = {
+  energyValues: Float32Array;
+  happinessValues: Float32Array;
+  hungerValues: Float32Array;
+  posX: Float32Array;
+  posY: Float32Array;
+  stateCodes: Uint8Array;
+};
+
 export type WorldDynamicSnapshot = {
   day: number;
   economy: Economy;
   entities: {
-    agents: DynamicAgentSnapshot[];
     buildings: DynamicBuildingSnapshot[];
   };
+  frame: CompactAgentFrame;
   metrics: WorldMetrics;
   minutesOfDay: number;
+  selectedAgent?: DynamicAgentSnapshot;
   selectedAgentId?: string;
   tick: number;
   traffic: TrafficMap;
