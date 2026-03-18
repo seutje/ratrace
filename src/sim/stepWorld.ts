@@ -80,6 +80,9 @@ const overlapAllowedTileTypes = new Set<TileType>([
 const ROAD_RIGHT_OF_WAY_EPSILON = 1e-3;
 type OccupancyReservations = Map<string, number>;
 type StaffedCommercialCounts = Map<string, number>;
+type ShopSearchState = {
+  nearestByTile: Map<string, string | undefined>;
+};
 type StepBuildingIndex = {
   byId: Map<string, Building>;
   residential: Building[];
@@ -470,6 +473,7 @@ const arriveAtBuilding = (
   building: Building,
   buildingIndex: StepBuildingIndex,
   staffedCommercialCounts: StaffedCommercialCounts,
+  shopSearchState: ShopSearchState,
   world: WorldState,
 ) => {
   if (agent.destination?.kind === 'work' && building.id === agent.workId) {
@@ -537,6 +541,9 @@ const arriveAtBuilding = (
         agent.stats.happiness = clamp(agent.stats.happiness + 8, 0, MAX_STAT);
         agent.lastShoppedTick = world.tick;
         agent.thought = 'Pantry restocked.';
+        if (building.stock <= 0) {
+          invalidateShopSearchState(shopSearchState);
+        }
       }
       break;
     }
@@ -564,30 +571,6 @@ const updateAgentStats = (agent: Agent) => {
   if (agent.wallet <= 0 && agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD) {
     agent.thought = 'Hungry, but broke.';
   }
-};
-
-const nearestBuilding = (
-  buildingIndex: StepBuildingIndex,
-  from: Point,
-  kind: BuildingKind,
-  predicate?: (building: Building) => boolean,
-) => {
-  let nearest: Building | undefined;
-  let bestDistance = Number.POSITIVE_INFINITY;
-
-  for (const building of getBuildingsByKind(buildingIndex, kind)) {
-    if (predicate && !predicate(building)) {
-      continue;
-    }
-
-    const distance = Math.abs(building.tile.x - from.x) + Math.abs(building.tile.y - from.y);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      nearest = building;
-    }
-  }
-
-  return nearest;
 };
 
 const isOnBuildingTile = (agent: Agent, building?: Building) => {
@@ -639,6 +622,14 @@ const removeStaffedCommercialWorker = (counts: StaffedCommercialCounts, building
   counts.delete(buildingId);
 };
 
+const createShopSearchState = (): ShopSearchState => ({
+  nearestByTile: new Map(),
+});
+
+const invalidateShopSearchState = (shopSearchState: ShopSearchState) => {
+  shopSearchState.nearestByTile.clear();
+};
+
 const initializeAgentStepState = (world: WorldState, buildingIndex: StepBuildingIndex) => {
   computeTraffic(world);
   const reservations: OccupancyReservations = new Map();
@@ -666,10 +657,42 @@ const initializeAgentStepState = (world: WorldState, buildingIndex: StepBuilding
 const canServeShopper = (staffedCommercialCounts: StaffedCommercialCounts, building: Building) =>
   building.kind === BuildingKind.Commercial && building.stock > 0 && (staffedCommercialCounts.get(building.id) ?? 0) > 0;
 
+const getNearestServiceableCommercialBuilding = (
+  buildingIndex: StepBuildingIndex,
+  staffedCommercialCounts: StaffedCommercialCounts,
+  shopSearchState: ShopSearchState,
+  from: Point,
+) => {
+  const key = tileKey(from);
+  const cachedBuildingId = shopSearchState.nearestByTile.get(key);
+  if (cachedBuildingId !== undefined) {
+    return cachedBuildingId ? getBuilding(buildingIndex, cachedBuildingId) : undefined;
+  }
+
+  let nearest: Building | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (const building of buildingIndex.commercial) {
+    if (!canServeShopper(staffedCommercialCounts, building)) {
+      continue;
+    }
+
+    const distance = Math.abs(building.tile.x - from.x) + Math.abs(building.tile.y - from.y);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      nearest = building;
+    }
+  }
+
+  shopSearchState.nearestByTile.set(key, nearest?.id);
+  return nearest;
+};
+
 const determineDestination = (
   world: WorldState,
   buildingIndex: StepBuildingIndex,
   staffedCommercialCounts: StaffedCommercialCounts,
+  shopSearchState: ShopSearchState,
   agent: Agent,
 ): AgentDestination | undefined => {
   const home = getBuilding(buildingIndex, agent.homeId);
@@ -702,9 +725,7 @@ const determineDestination = (
     homeNeedsPantryRefill(home) &&
     (isOnBuildingTile(agent, home) || agent.destination?.kind === 'shop');
   if ((emergencyFoodRun || pantryRunFromHome) && agent.wallet >= getMinimumShoppingCash() && shoppingCooldownElapsed) {
-    const shop = nearestBuilding(buildingIndex, tile, BuildingKind.Commercial, (building) =>
-      canServeShopper(staffedCommercialCounts, building),
-    );
+    const shop = getNearestServiceableCommercialBuilding(buildingIndex, staffedCommercialCounts, shopSearchState, tile);
     if (shop) {
       return { buildingId: shop.id, kind: 'shop' };
     }
@@ -750,6 +771,7 @@ const routeAgent = (
   world: WorldState,
   buildingIndex: StepBuildingIndex,
   staffedCommercialCounts: StaffedCommercialCounts,
+  shopSearchState: ShopSearchState,
   agent: Agent,
   reservations: OccupancyReservations,
 ) => {
@@ -767,11 +789,11 @@ const routeAgent = (
       packLunchFromHome(agent, home);
     }
   }
-  const destination = determineDestination(world, buildingIndex, staffedCommercialCounts, agent);
+  const destination = determineDestination(world, buildingIndex, staffedCommercialCounts, shopSearchState, agent);
   if (!destination) {
-    if (home && isOnBuildingTile(agent, home) && agent.state !== AgentState.Sleeping) {
-      consumePantryMeal(agent, home);
-    }
+      if (home && isOnBuildingTile(agent, home) && agent.state !== AgentState.Sleeping) {
+        consumePantryMeal(agent, home);
+      }
     agent.destination = undefined;
     agent.route = [];
     agent.routeIndex = 0;
@@ -801,7 +823,7 @@ const routeAgent = (
     agent.destination = destination;
     agent.route = [];
     agent.routeIndex = 0;
-    arriveAtBuilding(agent, building, buildingIndex, staffedCommercialCounts, world);
+    arriveAtBuilding(agent, building, buildingIndex, staffedCommercialCounts, shopSearchState, world);
     return;
   }
 
@@ -811,13 +833,14 @@ const routeAgent = (
 
   const arrivedTile = getAgentCurrentTile(agent);
   if (arrivedTile.x === building.tile.x && arrivedTile.y === building.tile.y) {
-    arriveAtBuilding(agent, building, buildingIndex, staffedCommercialCounts, world);
+    arriveAtBuilding(agent, building, buildingIndex, staffedCommercialCounts, shopSearchState, world);
   }
 
   const staffedAfter = getStaffedCommercialBuildingId(world, buildingIndex, agent, arrivedTile);
   if (staffedBefore !== staffedAfter) {
     removeStaffedCommercialWorker(staffedCommercialCounts, staffedBefore);
     addStaffedCommercialWorker(staffedCommercialCounts, staffedAfter);
+    invalidateShopSearchState(shopSearchState);
   }
 };
 
@@ -1113,6 +1136,7 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
 
 export const stepWorldInPlace = (world: WorldState): WorldState => {
   const buildingIndex = createBuildingIndex(world);
+  const shopSearchState = createShopSearchState();
   world.tick += 1;
   world.minutesOfDay += gameMinutesPerTick;
 
@@ -1126,7 +1150,7 @@ export const stepWorldInPlace = (world: WorldState): WorldState => {
   const { reservations, staffedCommercialCounts } = initializeAgentStepState(world, buildingIndex);
   for (const agent of world.entities.agents) {
     updateAgentStats(agent);
-    routeAgent(world, buildingIndex, staffedCommercialCounts, agent, reservations);
+    routeAgent(world, buildingIndex, staffedCommercialCounts, shopSearchState, agent, reservations);
   }
   runPopulationTurnover(world, buildingIndex);
   updateEconomyTotals(world);
