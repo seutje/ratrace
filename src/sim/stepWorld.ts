@@ -1,6 +1,8 @@
 import {
   BASE_MOVE_SPEED,
+  COMMERCIAL_STARTING_CASH,
   COMMERCIAL_RESTOCK_PER_HOUR,
+  COMMERCIAL_SUBSIDY_PER_HOUR,
   HOUSEHOLD_GROWTH_COST,
   HOUSEHOLD_GROWTH_HAPPINESS_THRESHOLD,
   HOUSEHOLD_GROWTH_WALLET_THRESHOLD,
@@ -861,7 +863,7 @@ const restockCommercialBuildings = (world: WorldState, buildingIndex: StepBuildi
   }
 };
 
-const subsidizeIndustry = (world: WorldState, buildingIndex: StepBuildingIndex) => {
+const subsidizeBusinesses = (world: WorldState, buildingIndex: StepBuildingIndex) => {
   if (world.minutesOfDay % 60 !== 0) {
     return;
   }
@@ -871,20 +873,30 @@ const subsidizeIndustry = (world: WorldState, buildingIndex: StepBuildingIndex) 
     return;
   }
 
-  const industriesNeedingSupport = getBuildingsByKind(buildingIndex, BuildingKind.Industrial)
-    .filter((building) => building.cash < INDUSTRIAL_STARTING_CASH)
-    .sort((left, right) => left.cash - right.cash || left.id.localeCompare(right.id));
+  const businessesNeedingSupport = [
+    ...getBuildingsByKind(buildingIndex, BuildingKind.Commercial).map((building) => ({
+      building,
+      targetCash: COMMERCIAL_STARTING_CASH,
+      subsidyPerHour: COMMERCIAL_SUBSIDY_PER_HOUR,
+    })),
+    ...getBuildingsByKind(buildingIndex, BuildingKind.Industrial).map((building) => ({
+      building,
+      targetCash: INDUSTRIAL_STARTING_CASH,
+      subsidyPerHour: INDUSTRIAL_SUBSIDY_PER_HOUR,
+    })),
+  ]
+    .filter(({ building, targetCash }) => building.cash < targetCash)
+    .sort(
+      (left, right) =>
+        left.building.cash - right.building.cash || left.building.id.localeCompare(right.building.id),
+    );
 
-  for (const building of industriesNeedingSupport) {
+  for (const { building, targetCash, subsidyPerHour } of businessesNeedingSupport) {
     if (availableSubsidy <= 0) {
       break;
     }
 
-    const grant = Math.min(
-      INDUSTRIAL_SUBSIDY_PER_HOUR,
-      INDUSTRIAL_STARTING_CASH - building.cash,
-      availableSubsidy,
-    );
+    const grant = Math.min(subsidyPerHour, targetCash - building.cash, availableSubsidy);
     if (grant <= 0) {
       continue;
     }
@@ -1108,7 +1120,7 @@ export const stepWorld = (inputWorld: WorldState): WorldState => {
     world.day += 1;
   }
 
-  subsidizeIndustry(world, buildingIndex);
+  subsidizeBusinesses(world, buildingIndex);
   computeTraffic(world);
   restockCommercialBuildings(world, buildingIndex);
   const reservations = createOccupancyReservations(world);

@@ -3,6 +3,8 @@ import { COMMERCIAL_SHIFT_PROFILES, COMMERCIAL_WORKER_SHARE, INDUSTRIAL_SHIFT_PR
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
 import { paintWorldTile } from '../sim/worldMutations';
 import {
+  COMMERCIAL_STARTING_CASH,
+  COMMERCIAL_SUBSIDY_PER_HOUR,
   HOUSEHOLD_GROWTH_COST,
   INDUSTRIAL_OUTPUT_PER_HOUR,
   INDUSTRIAL_STARTING_CASH,
@@ -614,14 +616,26 @@ describe('economy', () => {
     expect(next.entities.buildings.find((building) => building.id === 'mill')!.cash).toBe(50 + 4 * WHOLESALE_PRICE_PER_UNIT);
   });
 
-  it('recirculates treasury surplus into cash-poor industry', () => {
+  it('recirculates treasury surplus into cash-poor businesses', () => {
     const world = createBlankWorld(2, 1);
     world.economy.treasury = TREASURY_RESERVE_TARGET + 20;
-    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Industrial, buildingId: 'mill' });
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Commercial, buildingId: 'shop' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Industrial, buildingId: 'mill' });
+    world.entities.buildings.push({
+      id: 'shop',
+      kind: BuildingKind.Commercial,
+      tile: { x: 0, y: 0 },
+      cash: COMMERCIAL_STARTING_CASH - 20,
+      stock: 0,
+      capacity: 4,
+      pantryStock: 0,
+      pantryCapacity: 0,
+      label: 'shop',
+    });
     world.entities.buildings.push({
       id: 'mill',
       kind: BuildingKind.Industrial,
-      tile: { x: 0, y: 0 },
+      tile: { x: 1, y: 0 },
       cash: INDUSTRIAL_STARTING_CASH - 20,
       stock: 0,
       capacity: 4,
@@ -633,10 +647,15 @@ describe('economy', () => {
 
     const next = stepWorld(world);
 
+    expect(next.entities.buildings.find((building) => building.id === 'shop')!.cash).toBe(
+      COMMERCIAL_STARTING_CASH - 20 + COMMERCIAL_SUBSIDY_PER_HOUR,
+    );
     expect(next.entities.buildings.find((building) => building.id === 'mill')!.cash).toBe(
       INDUSTRIAL_STARTING_CASH - 20 + INDUSTRIAL_SUBSIDY_PER_HOUR,
     );
-    expect(next.economy.treasury).toBe(TREASURY_RESERVE_TARGET + 20 - INDUSTRIAL_SUBSIDY_PER_HOUR);
+    expect(next.economy.treasury).toBe(
+      TREASURY_RESERVE_TARGET + 20 - COMMERCIAL_SUBSIDY_PER_HOUR - INDUSTRIAL_SUBSIDY_PER_HOUR,
+    );
   });
 
   it('grows the treasury over the first day in the starter city', () => {
