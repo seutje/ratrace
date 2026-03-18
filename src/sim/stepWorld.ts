@@ -164,22 +164,6 @@ const removeReservation = (reservations: OccupancyReservations, key?: string) =>
   reservations.delete(key);
 };
 
-const createOccupancyReservations = (world: WorldState) => {
-  const reservations: OccupancyReservations = new Map();
-
-  for (const agent of world.entities.agents) {
-    const currentTile = getAgentCurrentTile(agent);
-    const currentTileType = getTile(world, currentTile)?.type ?? TileType.Empty;
-    if (allowsAgentOverlap(currentTileType)) {
-      continue;
-    }
-
-    addReservation(reservations, getAgentTrafficKey(world, agent, currentTile, currentTileType));
-  }
-
-  return reservations;
-};
-
 const getTargetOccupancyKey = (world: WorldState, currentTile: Point, targetTile?: Point) => {
   if (!targetTile) {
     return undefined;
@@ -615,13 +599,18 @@ const isOnBuildingTile = (agent: Agent, building?: Building) => {
   return tile.x === building.tile.x && tile.y === building.tile.y;
 };
 
-const getStaffedCommercialBuildingId = (world: WorldState, buildingIndex: StepBuildingIndex, agent: Agent) => {
+const getStaffedCommercialBuildingId = (
+  world: WorldState,
+  buildingIndex: StepBuildingIndex,
+  agent: Agent,
+  currentTile = getAgentCurrentTile(agent),
+) => {
   const work = getBuilding(buildingIndex, agent.workId);
   if (!work || work.kind !== BuildingKind.Commercial) {
     return undefined;
   }
 
-  if (!isOnBuildingTile(agent, work)) {
+  if (currentTile.x !== work.tile.x || currentTile.y !== work.tile.y) {
     return undefined;
   }
 
@@ -650,14 +639,28 @@ const removeStaffedCommercialWorker = (counts: StaffedCommercialCounts, building
   counts.delete(buildingId);
 };
 
-const createStaffedCommercialCounts = (world: WorldState, buildingIndex: StepBuildingIndex) => {
-  const staffedCounts: StaffedCommercialCounts = new Map();
+const initializeAgentStepState = (world: WorldState, buildingIndex: StepBuildingIndex) => {
+  computeTraffic(world);
+  const reservations: OccupancyReservations = new Map();
+  const staffedCommercialCounts: StaffedCommercialCounts = new Map();
 
   for (const agent of world.entities.agents) {
-    addStaffedCommercialWorker(staffedCounts, getStaffedCommercialBuildingId(world, buildingIndex, agent));
+    const currentTile = getAgentCurrentTile(agent);
+    const currentTileType = getTile(world, currentTile)?.type ?? TileType.Empty;
+    if (!allowsAgentOverlap(currentTileType)) {
+      addReservation(reservations, getAgentTrafficKey(world, agent, currentTile, currentTileType));
+    }
+
+    addStaffedCommercialWorker(
+      staffedCommercialCounts,
+      getStaffedCommercialBuildingId(world, buildingIndex, agent, currentTile),
+    );
   }
 
-  return staffedCounts;
+  return {
+    reservations,
+    staffedCommercialCounts,
+  };
 };
 
 const canServeShopper = (staffedCommercialCounts: StaffedCommercialCounts, building: Building) =>
@@ -750,10 +753,11 @@ const routeAgent = (
   agent: Agent,
   reservations: OccupancyReservations,
 ) => {
-  const staffedBefore = getStaffedCommercialBuildingId(world, buildingIndex, agent);
+  const currentTile = getAgentCurrentTile(agent);
+  const staffedBefore = getStaffedCommercialBuildingId(world, buildingIndex, agent, currentTile);
   activateShiftIfDue(world, agent);
   const home = getBuilding(buildingIndex, agent.homeId);
-  const homeTile = home && isOnBuildingTile(agent, home);
+  const homeTile = home && currentTile.x === home.tile.x && currentTile.y === home.tile.y;
   if (agent.state !== AgentState.Sleeping) {
     if (homeTile) {
       packLunchFromHome(agent, home);
@@ -772,7 +776,7 @@ const routeAgent = (
     agent.route = [];
     agent.routeIndex = 0;
     agent.state = AgentState.Idle;
-    const staffedAfter = getStaffedCommercialBuildingId(world, buildingIndex, agent);
+    const staffedAfter = getStaffedCommercialBuildingId(world, buildingIndex, agent, currentTile);
     if (staffedBefore !== staffedAfter) {
       removeStaffedCommercialWorker(staffedCommercialCounts, staffedBefore);
       addStaffedCommercialWorker(staffedCommercialCounts, staffedAfter);
@@ -793,7 +797,6 @@ const routeAgent = (
     return;
   }
 
-  const currentTile = getAgentCurrentTile(agent);
   if (currentTile.x === building.tile.x && currentTile.y === building.tile.y) {
     agent.destination = destination;
     agent.route = [];
@@ -811,7 +814,7 @@ const routeAgent = (
     arriveAtBuilding(agent, building, buildingIndex, staffedCommercialCounts, world);
   }
 
-  const staffedAfter = getStaffedCommercialBuildingId(world, buildingIndex, agent);
+  const staffedAfter = getStaffedCommercialBuildingId(world, buildingIndex, agent, arrivedTile);
   if (staffedBefore !== staffedAfter) {
     removeStaffedCommercialWorker(staffedCommercialCounts, staffedBefore);
     addStaffedCommercialWorker(staffedCommercialCounts, staffedAfter);
@@ -1108,8 +1111,7 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
   world.metrics.populationCapacity = capacity;
 };
 
-export const stepWorld = (inputWorld: WorldState): WorldState => {
-  const world = cloneWorldForStep(inputWorld);
+export const stepWorldInPlace = (world: WorldState): WorldState => {
   const buildingIndex = createBuildingIndex(world);
   world.tick += 1;
   world.minutesOfDay += gameMinutesPerTick;
@@ -1120,10 +1122,8 @@ export const stepWorld = (inputWorld: WorldState): WorldState => {
   }
 
   subsidizeBusinesses(world, buildingIndex);
-  computeTraffic(world);
   restockCommercialBuildings(world, buildingIndex);
-  const reservations = createOccupancyReservations(world);
-  const staffedCommercialCounts = createStaffedCommercialCounts(world, buildingIndex);
+  const { reservations, staffedCommercialCounts } = initializeAgentStepState(world, buildingIndex);
   for (const agent of world.entities.agents) {
     updateAgentStats(agent);
     routeAgent(world, buildingIndex, staffedCommercialCounts, agent, reservations);
@@ -1133,6 +1133,8 @@ export const stepWorld = (inputWorld: WorldState): WorldState => {
 
   return world;
 };
+
+export const stepWorld = (inputWorld: WorldState): WorldState => stepWorldInPlace(cloneWorldForStep(inputWorld));
 
 export const advanceWorld = (
   world: WorldState,

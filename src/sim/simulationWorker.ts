@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
 import { STARTER_WORLD_SEED, msPerTick } from './constants';
-import { stepWorld } from './stepWorld';
+import { stepWorldInPlace } from './stepWorld';
 import {
   DynamicAgentSnapshot,
   SimulationWorkerInboundMessage,
@@ -97,7 +97,7 @@ function runTick() {
   }
 
   const tickStartedAt = self.performance.now();
-  world = stepWorld(world);
+  world = stepWorldInPlace(world);
   publishDynamicSnapshot();
   const tickDuration = self.performance.now() - tickStartedAt;
   scheduleNextTick(Math.max(0, msPerTick - tickDuration));
@@ -140,7 +140,7 @@ self.onmessage = (event: MessageEvent<SimulationWorkerInboundMessage>) => {
       break;
     case 'step':
       stopTickLoop();
-      world = stepWorld(world);
+      world = stepWorldInPlace(world);
       publishDynamicSnapshot();
       if (!paused) {
         scheduleNextTick();
