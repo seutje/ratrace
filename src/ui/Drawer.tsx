@@ -10,6 +10,7 @@ type DrawerProps = {
 
 export const Drawer = ({ title, className, defaultOpen = true, summary, children }: DrawerProps) => {
   const [open, setOpen] = useState(defaultOpen);
+  const toggleLabel = `${open ? 'Hide' : 'Show'} ${title}`;
 
   return (
     <section className={`drawer ${open ? 'open' : 'collapsed'} ${className ?? ''}`.trim()}>
@@ -20,7 +21,12 @@ export const Drawer = ({ title, className, defaultOpen = true, summary, children
         </div>
         <div className="drawer-actions">
           {summary}
-          <button type="button" className="drawer-toggle" onClick={() => setOpen((currentOpen) => !currentOpen)}>
+          <button
+            type="button"
+            className="drawer-toggle"
+            aria-label={toggleLabel}
+            onClick={() => setOpen((currentOpen) => !currentOpen)}
+          >
             {open ? 'Hide' : 'Show'}
           </button>
         </div>

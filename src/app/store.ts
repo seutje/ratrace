@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
 import { MAX_FRAME_ADVANCE_MS, STARTER_WORLD_SEED } from '../sim/constants';
-import { BuildMode, WorldState } from '../sim/types';
+import { BuildMode, OverlayMode, WorldState } from '../sim/types';
 import {
   SimulationWorkerInboundMessage,
   SimulationWorkerOutboundMessage,
@@ -14,6 +14,7 @@ type WorldStore = {
   world: WorldState;
   paused: boolean;
   buildMode: BuildMode;
+  overlayMode: OverlayMode;
   carryMs: number;
   bootstrap: (seed?: number) => void;
   reset: () => void;
@@ -22,6 +23,7 @@ type WorldStore = {
   advanceElapsed: (elapsedMs: number) => void;
   selectAgent: (agentId?: string) => void;
   setBuildMode: (mode: BuildMode) => void;
+  setOverlayMode: (mode: OverlayMode) => void;
   paintTile: (x: number, y: number, type: BuildMode) => void;
 };
 
@@ -99,6 +101,7 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
   world: createStarterWorld(),
   paused: false,
   buildMode: 'select',
+  overlayMode: 'none',
   carryMs: 0,
   bootstrap: (seed = STARTER_WORLD_SEED) => {
     pendingElapsedMs = 0;
@@ -203,6 +206,7 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
     }));
   },
   setBuildMode: (mode) => set({ buildMode: mode }),
+  setOverlayMode: (mode) => set({ overlayMode: mode }),
   paintTile: (x, y, mode) => {
     if (mode === 'select') {
       return;

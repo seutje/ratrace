@@ -1,4 +1,4 @@
-import { AgentState, TileType, WorldState } from '../sim/types';
+import { AgentState, BuildingKind, OverlayMode, TileType, WorldState } from '../sim/types';
 
 export type Viewport = {
   tileSize: number;
@@ -105,8 +105,164 @@ export const renderStaticWorld = (ctx: CanvasRenderingContext2D, world: WorldSta
   }
 };
 
-export const renderDynamicWorld = (ctx: CanvasRenderingContext2D, world: WorldState, viewport: Viewport) => {
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+const getOverlayFill = (hue: number, saturation: number, lightness: number, alpha: number) =>
+  `hsla(${hue} ${saturation}% ${lightness}% / ${clamp01(alpha)})`;
+
+const drawTileOverlay = (
+  ctx: CanvasRenderingContext2D,
+  viewport: Viewport,
+  tile: { x: number; y: number },
+  fillStyle: string,
+) => {
+  const pixel = tileToPixel(tile.x, tile.y, viewport);
+  const inset = Math.max(1, viewport.tileSize * 0.08);
+
+  ctx.fillStyle = fillStyle;
+  ctx.fillRect(
+    pixel.x + inset,
+    pixel.y + inset,
+    Math.max(1, viewport.tileSize - inset * 2),
+    Math.max(1, viewport.tileSize - inset * 2),
+  );
+};
+
+const renderTrafficOverlay = (ctx: CanvasRenderingContext2D, world: WorldState, viewport: Viewport) => {
+  const trafficByTile = new Map<string, { x: number; y: number; count: number }>();
+
+  for (const [key, count] of Object.entries(world.traffic)) {
+    const [tile] = key.split(':');
+    if (!tile) {
+      continue;
+    }
+
+    const [xText, yText] = tile.split(',');
+    const x = Number(xText);
+    const y = Number(yText);
+    if (Number.isNaN(x) || Number.isNaN(y)) {
+      continue;
+    }
+
+    const traffic = trafficByTile.get(tile);
+    if (traffic) {
+      traffic.count += count;
+      continue;
+    }
+
+    trafficByTile.set(tile, { x, y, count });
+  }
+
+  const peak = Math.max(1, world.metrics.trafficPeak);
+  for (const traffic of trafficByTile.values()) {
+    const intensity = traffic.count / peak;
+    drawTileOverlay(ctx, viewport, traffic, getOverlayFill(14, 86, 54, 0.2 + intensity * 0.55));
+  }
+};
+
+const renderHousingOverlay = (ctx: CanvasRenderingContext2D, world: WorldState, viewport: Viewport) => {
+  const occupancy = new Map<string, number>();
+  for (const agent of world.entities.agents) {
+    occupancy.set(agent.homeId, (occupancy.get(agent.homeId) ?? 0) + 1);
+  }
+
+  for (const building of world.entities.buildings) {
+    if (building.kind !== BuildingKind.Residential) {
+      continue;
+    }
+
+    const filledRatio = building.capacity > 0 ? (occupancy.get(building.id) ?? 0) / building.capacity : 0;
+    const hue = 110 - clamp01(filledRatio) * 110;
+    drawTileOverlay(ctx, viewport, building.tile, getOverlayFill(hue, 58, 54, 0.22 + filledRatio * 0.5));
+  }
+};
+
+const renderBusinessCashOverlay = (ctx: CanvasRenderingContext2D, world: WorldState, viewport: Viewport) => {
+  const cashLevels = world.entities.buildings
+    .filter((building) => building.kind === BuildingKind.Commercial || building.kind === BuildingKind.Industrial)
+    .map((building) => building.cash);
+  const maxCash = Math.max(1, ...cashLevels);
+
+  for (const building of world.entities.buildings) {
+    if (building.kind !== BuildingKind.Commercial && building.kind !== BuildingKind.Industrial) {
+      continue;
+    }
+
+    const cashRatio = clamp01(building.cash / maxCash);
+    const hue = cashRatio * 120;
+    drawTileOverlay(ctx, viewport, building.tile, getOverlayFill(hue, 62, 46, 0.26 + (1 - cashRatio) * 0.28));
+  }
+};
+
+const renderRetailStockOverlay = (ctx: CanvasRenderingContext2D, world: WorldState, viewport: Viewport) => {
+  for (const building of world.entities.buildings) {
+    if (building.kind !== BuildingKind.Commercial) {
+      continue;
+    }
+
+    const stockRatio = building.capacity > 0 ? clamp01(building.stock / building.capacity) : 0;
+    const hue = stockRatio * 120;
+    drawTileOverlay(ctx, viewport, building.tile, getOverlayFill(hue, 72, 48, 0.2 + (1 - stockRatio) * 0.42));
+  }
+};
+
+const renderAgentStatOverlay = (
+  ctx: CanvasRenderingContext2D,
+  world: WorldState,
+  viewport: Viewport,
+  mode: Extract<OverlayMode, 'hunger' | 'energy'>,
+) => {
+  for (const agent of world.entities.agents) {
+    const severity = mode === 'hunger' ? clamp01(agent.stats.hunger / 100) : clamp01((100 - agent.stats.energy) / 100);
+    if (severity <= 0.15) {
+      continue;
+    }
+
+    const x = viewport.offsetX + agent.pos.x * viewport.tileSize;
+    const y = viewport.offsetY + agent.pos.y * viewport.tileSize;
+
+    ctx.beginPath();
+    ctx.arc(x, y, viewport.tileSize * (0.22 + severity * 0.34), 0, Math.PI * 2);
+    ctx.fillStyle =
+      mode === 'hunger'
+        ? getOverlayFill(10, 88, 54, 0.08 + severity * 0.32)
+        : getOverlayFill(214, 74, 48, 0.08 + severity * 0.26);
+    ctx.fill();
+  }
+};
+
+const renderOverlay = (ctx: CanvasRenderingContext2D, world: WorldState, viewport: Viewport, overlayMode: OverlayMode) => {
+  switch (overlayMode) {
+    case 'traffic':
+      renderTrafficOverlay(ctx, world, viewport);
+      break;
+    case 'hunger':
+    case 'energy':
+      renderAgentStatOverlay(ctx, world, viewport, overlayMode);
+      break;
+    case 'housing':
+      renderHousingOverlay(ctx, world, viewport);
+      break;
+    case 'businessCash':
+      renderBusinessCashOverlay(ctx, world, viewport);
+      break;
+    case 'retailStock':
+      renderRetailStockOverlay(ctx, world, viewport);
+      break;
+    case 'none':
+      break;
+  }
+};
+
+export const renderDynamicWorld = (
+  ctx: CanvasRenderingContext2D,
+  world: WorldState,
+  viewport: Viewport,
+  overlayMode: OverlayMode = 'none',
+) => {
   ctx.lineWidth = 1;
+
+  renderOverlay(ctx, world, viewport, overlayMode);
 
   for (const agent of world.entities.agents) {
     const x = viewport.offsetX + agent.pos.x * viewport.tileSize;

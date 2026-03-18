@@ -103,6 +103,15 @@ export type WorldMetrics = {
   populationCapacity: number;
 };
 
+export type OverlayMode =
+  | 'none'
+  | 'traffic'
+  | 'hunger'
+  | 'energy'
+  | 'housing'
+  | 'businessCash'
+  | 'retailStock';
+
 export type WorldState = {
   seed: number;
   tick: number;

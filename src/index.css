@@ -152,6 +152,12 @@ body {
   bottom: 18px;
 }
 
+.drawer-overlays {
+  top: 18px;
+  left: 18px;
+  width: min(300px, calc(100vw - 36px));
+}
+
 .drawer-inspector {
   top: 18px;
   right: 18px;
@@ -257,6 +263,12 @@ body {
 }
 
 .build-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.overlay-grid {
+  display: grid;
+  gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -376,6 +388,11 @@ button.selected {
     width: min(420px, calc(100vw - 36px));
   }
 
+  .drawer-overlays {
+    left: 18px;
+    width: min(320px, calc(100vw - 36px));
+  }
+
   .drawer-inspector {
     top: auto;
     bottom: 18px;
@@ -402,8 +419,13 @@ button.selected {
     bottom: 12px;
   }
 
+  .drawer-overlays {
+    top: 136px;
+    bottom: auto;
+  }
+
   .drawer-inspector {
-    top: 150px;
+    top: 344px;
     bottom: auto;
   }
 
@@ -418,6 +440,7 @@ button.selected {
   .button-row,
   .zoom-row,
   .build-grid,
+  .overlay-grid,
   .hud,
   .hud-inline {
     grid-template-columns: 1fr;

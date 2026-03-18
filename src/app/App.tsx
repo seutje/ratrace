@@ -15,6 +15,8 @@ import { Controls } from '../ui/Controls';
 import { Drawer } from '../ui/Drawer';
 import { Hud } from '../ui/Hud';
 import { Inspector } from '../ui/Inspector';
+import { OverlayMenu } from '../ui/OverlayMenu';
+import { getOverlayModeLabel } from '../ui/overlayOptions';
 import {
   findAgentAtCanvasPoint,
   startSimulationWorker,
@@ -68,11 +70,13 @@ export const App = () => {
   const worldHeight = useWorldStore((state) => state.world.height);
   const paused = useWorldStore((state) => state.paused);
   const buildMode = useWorldStore((state) => state.buildMode);
+  const overlayMode = useWorldStore((state) => state.overlayMode);
   const advanceElapsed = useWorldStore((state) => state.advanceElapsed);
   const setPaused = useWorldStore((state) => state.setPaused);
   const singleStep = useWorldStore((state) => state.singleStep);
   const reset = useWorldStore((state) => state.reset);
   const setBuildMode = useWorldStore((state) => state.setBuildMode);
+  const setOverlayMode = useWorldStore((state) => state.setOverlayMode);
   const selectAgent = useWorldStore((state) => state.selectAgent);
   const paintTile = useWorldStore((state) => state.paintTile);
 
@@ -151,7 +155,7 @@ export const App = () => {
         renderStaticWorld(context, world, viewport);
       }
 
-      renderDynamicWorld(context, world, viewport);
+      renderDynamicWorld(context, world, viewport, overlayMode);
     };
 
     drawWorld(useWorldStore.getState().world);
@@ -163,7 +167,7 @@ export const App = () => {
 
       drawWorld(state.world);
     });
-  }, [size.height, size.width, viewport]);
+  }, [overlayMode, size.height, size.width, viewport]);
 
   const getCanvasPoint = (
     event: PointerEvent<HTMLCanvasElement> | WheelEvent<HTMLCanvasElement>,
@@ -344,6 +348,14 @@ export const App = () => {
             />
             <BuildMenu mode={buildMode} onChange={setBuildMode} />
           </div>
+        </Drawer>
+        <Drawer
+          title="Overlays"
+          className="drawer-overlays"
+          defaultOpen={false}
+          summary={<span className="drawer-pill">{getOverlayModeLabel(overlayMode)}</span>}
+        >
+          <OverlayMenu mode={overlayMode} onChange={setOverlayMode} />
         </Drawer>
         <Drawer title="Inspector" className="drawer-inspector">
           <Inspector />
