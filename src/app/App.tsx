@@ -19,11 +19,13 @@ import { OverlayMenu } from '../ui/OverlayMenu';
 import { getOverlayModeLabel } from '../ui/overlayOptions';
 import {
   findAgentAtCanvasPoint,
+  getRenderInterpolationState,
   startSimulationWorker,
   stopSimulationWorker,
   tileFromCanvasPoint,
   useWorldStore,
 } from './store';
+import { msPerTick } from '../sim/constants';
 
 type CanvasSize = {
   width: number;
@@ -132,7 +134,9 @@ export const App = () => {
       return;
     }
 
-    const drawWorld = (world: WorldState) => {
+    let frame = 0;
+
+    const drawWorld = (world: WorldState, frameTime: number) => {
       const staticLayerKey = getStaticWorldCacheKey(world, viewport);
       if (staticLayerKeyRef.current !== staticLayerKey) {
         staticLayerKeyRef.current = staticLayerKey;
@@ -155,18 +159,24 @@ export const App = () => {
         renderStaticWorld(context, world, viewport);
       }
 
-      renderDynamicWorld(context, world, viewport, overlayMode);
+      const { previous, current, currentReceivedAtMs } = getRenderInterpolationState();
+      const interpolationAlpha =
+        previous && current ? Math.max(0, Math.min(1, (frameTime - currentReceivedAtMs) / msPerTick)) : 1;
+
+      renderDynamicWorld(context, world, viewport, overlayMode, {
+        alpha: interpolationAlpha,
+        previousAgents: previous?.entities.agents,
+      });
     };
 
-    drawWorld(useWorldStore.getState().world);
+    const renderFrame = (time: number) => {
+      drawWorld(useWorldStore.getState().world, time);
+      frame = requestAnimationFrame(renderFrame);
+    };
 
-    return useWorldStore.subscribe((state, previousState) => {
-      if (state.world === previousState.world) {
-        return;
-      }
+    frame = requestAnimationFrame(renderFrame);
 
-      drawWorld(state.world);
-    });
+    return () => cancelAnimationFrame(frame);
   }, [overlayMode, size.height, size.width, viewport]);
 
   const getCanvasPoint = (

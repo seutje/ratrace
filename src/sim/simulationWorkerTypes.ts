@@ -1,15 +1,39 @@
-import { BuildMode, WorldState } from './types';
+import {
+  Agent,
+  BuildMode,
+  Building,
+  Economy,
+  TrafficMap,
+  WorldMetrics,
+  WorldState,
+} from './types';
+
+export type DynamicAgentSnapshot = Omit<Agent, 'route' | 'routeIndex' | 'routeMapVersion'>;
+
+export type DynamicBuildingSnapshot = Building;
+
+export type WorldDynamicSnapshot = {
+  day: number;
+  economy: Economy;
+  entities: {
+    agents: DynamicAgentSnapshot[];
+    buildings: DynamicBuildingSnapshot[];
+  };
+  metrics: WorldMetrics;
+  minutesOfDay: number;
+  selectedAgentId?: string;
+  tick: number;
+  traffic: TrafficMap;
+};
 
 export type SimulationWorkerInboundMessage =
   | {
-      type: 'init';
-      carryMs: number;
-      world: WorldState;
+      paused: boolean;
+      type: 'sync';
     }
   | {
-      type: 'advance';
-      elapsedMs: number;
-      maxElapsedMs: number;
+      paused: boolean;
+      type: 'setPaused';
     }
   | {
       type: 'bootstrap';
@@ -33,7 +57,9 @@ export type SimulationWorkerInboundMessage =
     };
 
 export type SimulationWorkerOutboundMessage = {
-  type: 'snapshot';
-  carryMs: number;
+  type: 'fullSnapshot';
   world: WorldState;
+} | {
+  snapshot: WorldDynamicSnapshot;
+  type: 'dynamicSnapshot';
 };

@@ -3,8 +3,10 @@ import { advanceWorld, stepWorld } from '../sim/stepWorld';
 import { MAX_FRAME_ADVANCE_MS, STARTER_WORLD_SEED } from '../sim/constants';
 import { BuildMode, OverlayMode, WorldState } from '../sim/types';
 import {
+  DynamicAgentSnapshot,
   SimulationWorkerInboundMessage,
   SimulationWorkerOutboundMessage,
+  WorldDynamicSnapshot,
 } from '../sim/simulationWorkerTypes';
 import { paintWorldTile, selectWorldAgent } from '../sim/worldMutations';
 import { createStarterWorld } from '../sim/world';
@@ -28,39 +30,135 @@ type WorldStore = {
 };
 
 let simulationWorker: Worker | null = null;
-let pendingElapsedMs = 0;
-let advanceInFlight = false;
+let previousRenderSnapshot: WorldDynamicSnapshot | null = null;
+let currentRenderSnapshot: WorldDynamicSnapshot | null = null;
+let currentRenderSnapshotReceivedAtMs = 0;
+
+const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 const postSimulationWorkerMessage = (message: SimulationWorkerInboundMessage) => {
   simulationWorker?.postMessage(message);
 };
 
-const flushQueuedAdvance = () => {
-  if (!simulationWorker || advanceInFlight || pendingElapsedMs <= 0) {
-    return;
-  }
+const toDynamicSnapshot = (world: WorldState): WorldDynamicSnapshot => ({
+  day: world.day,
+  economy: { ...world.economy },
+  entities: {
+    agents: world.entities.agents.map((agent) => ({
+      carriedMeals: agent.carriedMeals,
+      daysInCity: agent.daysInCity,
+      destination: agent.destination ? { ...agent.destination } : undefined,
+      homeId: agent.homeId,
+      id: agent.id,
+      keptMaxHungerToday: agent.keptMaxHungerToday,
+      lastCompletedShiftDay: agent.lastCompletedShiftDay,
+      lastShoppedTick: agent.lastShoppedTick,
+      maxHungerStreakDays: agent.maxHungerStreakDays,
+      name: agent.name,
+      paidShiftWorkMinutes: agent.paidShiftWorkMinutes,
+      pos: { ...agent.pos },
+      routeComputeCount: agent.routeComputeCount,
+      shiftDay: agent.shiftDay,
+      shiftStartMinute: agent.shiftStartMinute,
+      shiftWorkMinutes: agent.shiftWorkMinutes,
+      sleepUntilTick: agent.sleepUntilTick,
+      state: agent.state,
+      stats: { ...agent.stats },
+      thought: agent.thought,
+      wallet: agent.wallet,
+      workId: agent.workId,
+    })),
+    buildings: world.entities.buildings.map((building) => ({
+      ...building,
+      tile: { ...building.tile },
+    })),
+  },
+  metrics: { ...world.metrics },
+  minutesOfDay: world.minutesOfDay,
+  selectedAgentId: world.selectedAgentId,
+  tick: world.tick,
+  traffic: { ...world.traffic },
+});
 
-  const elapsedMs = pendingElapsedMs;
-  pendingElapsedMs = 0;
-  advanceInFlight = true;
-  postSimulationWorkerMessage({
-    type: 'advance',
-    elapsedMs,
-    maxElapsedMs: MAX_FRAME_ADVANCE_MS,
-  });
+const setRenderSnapshots = (nextSnapshot: WorldDynamicSnapshot) => {
+  previousRenderSnapshot = currentRenderSnapshot ?? nextSnapshot;
+  currentRenderSnapshot = nextSnapshot;
+  currentRenderSnapshotReceivedAtMs = nowMs();
+};
+
+const hydrateAgent = (
+  snapshot: DynamicAgentSnapshot,
+  previousAgent?: WorldState['entities']['agents'][number],
+): WorldState['entities']['agents'][number] => ({
+  carriedMeals: snapshot.carriedMeals,
+  daysInCity: snapshot.daysInCity,
+  destination: snapshot.destination ? { ...snapshot.destination } : undefined,
+  homeId: snapshot.homeId,
+  id: snapshot.id,
+  keptMaxHungerToday: snapshot.keptMaxHungerToday,
+  lastCompletedShiftDay: snapshot.lastCompletedShiftDay,
+  lastShoppedTick: snapshot.lastShoppedTick,
+  maxHungerStreakDays: snapshot.maxHungerStreakDays,
+  name: snapshot.name,
+  paidShiftWorkMinutes: snapshot.paidShiftWorkMinutes,
+  pos: { ...snapshot.pos },
+  route: previousAgent?.route ?? [],
+  routeComputeCount: snapshot.routeComputeCount,
+  routeIndex: previousAgent?.routeIndex ?? 0,
+  routeMapVersion: previousAgent?.routeMapVersion ?? 0,
+  shiftDay: snapshot.shiftDay,
+  shiftStartMinute: snapshot.shiftStartMinute,
+  shiftWorkMinutes: snapshot.shiftWorkMinutes,
+  sleepUntilTick: snapshot.sleepUntilTick,
+  state: snapshot.state,
+  stats: { ...snapshot.stats },
+  thought: snapshot.thought,
+  wallet: snapshot.wallet,
+  workId: snapshot.workId,
+});
+
+const applyDynamicSnapshotToWorld = (world: WorldState, snapshot: WorldDynamicSnapshot): WorldState => {
+  const previousAgentsById = new Map(world.entities.agents.map((agent) => [agent.id, agent]));
+
+  return {
+    ...world,
+    day: snapshot.day,
+    economy: { ...snapshot.economy },
+    entities: {
+      agents: snapshot.entities.agents.map((agent) =>
+        hydrateAgent(agent, previousAgentsById.get(agent.id)),
+      ),
+      buildings: snapshot.entities.buildings.map((building) => ({
+        ...building,
+        tile: { ...building.tile },
+      })),
+    },
+    metrics: { ...snapshot.metrics },
+    minutesOfDay: snapshot.minutesOfDay,
+    selectedAgentId: snapshot.selectedAgentId,
+    tick: snapshot.tick,
+    traffic: { ...snapshot.traffic },
+  };
 };
 
 const applyWorkerSnapshot = (message: SimulationWorkerOutboundMessage) => {
-  advanceInFlight = false;
+  if (message.type === 'fullSnapshot') {
+    const snapshot = toDynamicSnapshot(message.world);
+    setRenderSnapshots(snapshot);
+    useWorldStore.setState((state) => ({
+      ...state,
+      carryMs: 0,
+      world: message.world,
+    }));
+    return;
+  }
+
+  setRenderSnapshots(message.snapshot);
   useWorldStore.setState((state) => ({
     ...state,
-    world: message.world,
-    carryMs: message.carryMs,
+    carryMs: 0,
+    world: applyDynamicSnapshotToWorld(state.world, message.snapshot),
   }));
-
-  if (!useWorldStore.getState().paused) {
-    flushQueuedAdvance();
-  }
 };
 
 export const startSimulationWorker = () => {
@@ -77,25 +175,29 @@ export const startSimulationWorker = () => {
     return;
   }
   simulationWorker.onmessage = (event: MessageEvent<SimulationWorkerOutboundMessage>) => {
-    if (event.data.type === 'snapshot') {
-      applyWorkerSnapshot(event.data);
-    }
+    applyWorkerSnapshot(event.data);
   };
 
   const state = useWorldStore.getState();
   postSimulationWorkerMessage({
-    type: 'init',
-    world: state.world,
-    carryMs: state.carryMs,
+    paused: state.paused,
+    type: 'sync',
   });
 };
 
 export const stopSimulationWorker = () => {
-  pendingElapsedMs = 0;
-  advanceInFlight = false;
+  previousRenderSnapshot = null;
+  currentRenderSnapshot = null;
+  currentRenderSnapshotReceivedAtMs = 0;
   simulationWorker?.terminate();
   simulationWorker = null;
 };
+
+export const getRenderInterpolationState = () => ({
+  current: currentRenderSnapshot,
+  currentReceivedAtMs: currentRenderSnapshotReceivedAtMs,
+  previous: previousRenderSnapshot,
+});
 
 export const useWorldStore = create<WorldStore>((set, get) => ({
   world: createStarterWorld(),
@@ -104,7 +206,6 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
   overlayMode: 'none',
   carryMs: 0,
   bootstrap: (seed = STARTER_WORLD_SEED) => {
-    pendingElapsedMs = 0;
     if (simulationWorker) {
       set({
         paused: false,
@@ -127,7 +228,6 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
     });
   },
   reset: () => {
-    pendingElapsedMs = 0;
     if (simulationWorker) {
       set({
         paused: false,
@@ -149,10 +249,11 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
   },
   setPaused: (paused) => {
     set({ paused });
-    if (!paused) {
-      flushQueuedAdvance();
-    } else {
-      pendingElapsedMs = 0;
+    if (simulationWorker) {
+      postSimulationWorkerMessage({
+        paused,
+        type: 'setPaused',
+      });
     }
   },
   singleStep: () => {
@@ -173,8 +274,6 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
     }
 
     if (simulationWorker) {
-      pendingElapsedMs += elapsedMs;
-      flushQueuedAdvance();
       return;
     }
 

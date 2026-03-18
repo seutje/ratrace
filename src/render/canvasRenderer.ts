@@ -1,4 +1,5 @@
 import { AgentState, BuildingKind, OverlayMode, TileType, WorldState } from '../sim/types';
+import { DynamicAgentSnapshot } from '../sim/simulationWorkerTypes';
 
 export type Viewport = {
   tileSize: number;
@@ -259,14 +260,27 @@ export const renderDynamicWorld = (
   world: WorldState,
   viewport: Viewport,
   overlayMode: OverlayMode = 'none',
+  interpolation?: {
+    alpha: number;
+    previousAgents?: DynamicAgentSnapshot[];
+  },
 ) => {
   ctx.lineWidth = 1;
 
   renderOverlay(ctx, world, viewport, overlayMode);
 
-  for (const agent of world.entities.agents) {
-    const x = viewport.offsetX + agent.pos.x * viewport.tileSize;
-    const y = viewport.offsetY + agent.pos.y * viewport.tileSize;
+  for (const [index, agent] of world.entities.agents.entries()) {
+    const previousAgent = interpolation?.previousAgents?.[index];
+    const canInterpolate = previousAgent?.id === agent.id;
+    const interpolationAlpha = interpolation?.alpha ?? 1;
+    const posX = canInterpolate
+      ? previousAgent.pos.x + (agent.pos.x - previousAgent.pos.x) * interpolationAlpha
+      : agent.pos.x;
+    const posY = canInterpolate
+      ? previousAgent.pos.y + (agent.pos.y - previousAgent.pos.y) * interpolationAlpha
+      : agent.pos.y;
+    const x = viewport.offsetX + posX * viewport.tileSize;
+    const y = viewport.offsetY + posY * viewport.tileSize;
 
     ctx.beginPath();
     ctx.arc(x, y, viewport.tileSize * 0.2, 0, Math.PI * 2);
