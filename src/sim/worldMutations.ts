@@ -39,8 +39,11 @@ const reassignInvalidReferences = (world: WorldState) => {
   const workplaces = world.entities.buildings.filter((building) => building.kind !== BuildingKind.Residential);
 
   world.entities.agents.forEach((agent) => {
+    let invalidatedCommute = false;
+
     if (!homes.some((building) => building.id === agent.homeId) && homes[0]) {
       agent.homeId = homes[0].id;
+      invalidatedCommute = true;
     }
 
     if (!workplaces.some((building) => building.id === agent.workId)) {
@@ -57,7 +60,19 @@ const reassignInvalidReferences = (world: WorldState) => {
       if (assignment) {
         agent.workId = assignment.workId;
         agent.shiftStartMinute = assignment.shiftStartMinute;
+        invalidatedCommute = true;
       }
+    }
+
+    if (invalidatedCommute) {
+      agent.route = [];
+      agent.routeIndex = 0;
+      agent.routeMapVersion = 0;
+      agent.destination = undefined;
+      agent.commuteToWorkRoute = null;
+      agent.commuteToWorkRouteMapVersion = 0;
+      agent.commuteToHomeRoute = null;
+      agent.commuteToHomeRouteMapVersion = 0;
     }
   });
 };

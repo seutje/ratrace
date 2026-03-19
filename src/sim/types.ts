@@ -81,6 +81,10 @@ export type Agent = {
   routeIndex: number;
   routeComputeCount: number;
   routeMapVersion: number;
+  commuteToWorkRoute: Point[] | null;
+  commuteToWorkRouteMapVersion: number;
+  commuteToHomeRoute: Point[] | null;
+  commuteToHomeRouteMapVersion: number;
   destination?: AgentDestination;
   lastShoppedTick?: number;
   sleepUntilTick?: number;

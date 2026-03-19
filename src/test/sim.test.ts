@@ -67,6 +67,10 @@ const makeTestAgent = (overrides: Partial<WorldState['entities']['agents'][numbe
   routeIndex: 0,
   routeComputeCount: 0,
   routeMapVersion: 0,
+  commuteToWorkRoute: null,
+  commuteToWorkRouteMapVersion: 0,
+  commuteToHomeRoute: null,
+  commuteToHomeRouteMapVersion: 0,
   destination: undefined,
   lastShoppedTick: undefined,
   sleepUntilTick: undefined,
@@ -415,6 +419,151 @@ describe('agent behavior', () => {
     world = stepTimes(world, 5);
 
     expect(world.entities.agents[0]!.routeComputeCount).toBe(count);
+  });
+
+  it('reuses a remembered commute path on later work trips until the map changes', () => {
+    const world = createBlankWorld(2, 1);
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Industrial, buildingId: 'work' });
+    world.entities.buildings.push(
+      {
+        id: 'home',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 1,
+        pantryStock: 2,
+        pantryCapacity: 2,
+        label: 'home',
+      },
+      {
+        id: 'work',
+        kind: BuildingKind.Industrial,
+        tile: { x: 1, y: 0 },
+        cash: INDUSTRIAL_STARTING_CASH,
+        stock: 2,
+        capacity: 1,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'work',
+      },
+    );
+    world.entities.agents = [
+      makeTestAgent({
+        homeId: 'home',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 0 }),
+        stats: { hunger: 0, energy: 100, happiness: 80 },
+        shiftDay: 0,
+        lastCompletedShiftDay: world.day - 1,
+      }),
+    ];
+
+    world.minutesOfDay = 8 * 60;
+    const leavingForWork = stepWorld(world);
+    expect(leavingForWork.entities.agents[0]!.routeComputeCount).toBe(1);
+    expect(leavingForWork.entities.agents[0]!.commuteToWorkRoute).toEqual([
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+    ]);
+
+    leavingForWork.entities.agents[0]!.pos = tileCenter({ x: 1, y: 0 });
+    leavingForWork.entities.agents[0]!.destination = { buildingId: 'work', kind: 'work' };
+    leavingForWork.entities.agents[0]!.route = [];
+    leavingForWork.entities.agents[0]!.routeIndex = 0;
+    leavingForWork.entities.agents[0]!.routeMapVersion = 0;
+    leavingForWork.entities.agents[0]!.shiftDay = world.day;
+    leavingForWork.entities.agents[0]!.shiftWorkMinutes = WORK_SHIFT_MINUTES;
+    leavingForWork.entities.agents[0]!.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
+    leavingForWork.entities.agents[0]!.lastCompletedShiftDay = world.day;
+    leavingForWork.minutesOfDay = 18 * 60;
+
+    const headingHome = stepWorld(leavingForWork);
+    expect(headingHome.entities.agents[0]!.routeComputeCount).toBe(2);
+
+    headingHome.entities.agents[0]!.pos = tileCenter({ x: 0, y: 0 });
+    headingHome.entities.agents[0]!.destination = undefined;
+    headingHome.entities.agents[0]!.route = [];
+    headingHome.entities.agents[0]!.routeIndex = 0;
+    headingHome.entities.agents[0]!.routeMapVersion = 0;
+    headingHome.entities.agents[0]!.shiftDay = 0;
+    headingHome.entities.agents[0]!.shiftWorkMinutes = 0;
+    headingHome.entities.agents[0]!.paidShiftWorkMinutes = 0;
+    headingHome.entities.agents[0]!.lastCompletedShiftDay = world.day;
+    headingHome.day = world.day + 1;
+    headingHome.minutesOfDay = 8 * 60;
+
+    const nextCommute = stepWorld(headingHome);
+    expect(nextCommute.entities.agents[0]!.routeComputeCount).toBe(2);
+    expect(nextCommute.entities.agents[0]!.route).toEqual([
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+    ]);
+  });
+
+  it('invalidates remembered commute paths on paint without recalculating them eagerly', () => {
+    let world = createBlankWorld(3, 1);
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Road });
+    setTile(world, { x: 2, y: 0 }, { x: 2, y: 0, type: TileType.Industrial, buildingId: 'work' });
+    world.entities.buildings.push(
+      {
+        id: 'home',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 1,
+        pantryStock: 2,
+        pantryCapacity: 2,
+        label: 'home',
+      },
+      {
+        id: 'work',
+        kind: BuildingKind.Industrial,
+        tile: { x: 2, y: 0 },
+        cash: INDUSTRIAL_STARTING_CASH,
+        stock: 2,
+        capacity: 1,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'work',
+      },
+    );
+    world.entities.agents = [
+      makeTestAgent({
+        homeId: 'home',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 0 }),
+        stats: { hunger: 0, energy: 100, happiness: 80 },
+        shiftDay: 0,
+        lastCompletedShiftDay: world.day - 1,
+      }),
+    ];
+    world.minutesOfDay = 8 * 60;
+
+    world = stepWorld(world);
+    expect(world.entities.agents[0]!.routeComputeCount).toBe(1);
+    expect(world.entities.agents[0]!.commuteToWorkRouteMapVersion).toBe(world.metrics.mapVersion);
+
+    const painted = paintWorldTile(world, 1, 0, TileType.Road);
+    expect(painted.metrics.mapVersion).toBe(world.metrics.mapVersion + 1);
+    expect(painted.entities.agents[0]!.routeComputeCount).toBe(1);
+    expect(painted.entities.agents[0]!.commuteToWorkRouteMapVersion).toBe(world.metrics.mapVersion);
+
+    painted.entities.agents[0]!.pos = tileCenter({ x: 0, y: 0 });
+    painted.entities.agents[0]!.destination = undefined;
+    painted.entities.agents[0]!.route = [];
+    painted.entities.agents[0]!.routeIndex = 0;
+    painted.entities.agents[0]!.routeMapVersion = 0;
+    painted.entities.agents[0]!.shiftDay = 0;
+    painted.entities.agents[0]!.lastCompletedShiftDay = painted.day - 1;
+    painted.minutesOfDay = 8 * 60;
+
+    const recomputed = stepWorld(painted);
+    expect(recomputed.entities.agents[0]!.routeComputeCount).toBe(2);
+    expect(recomputed.entities.agents[0]!.commuteToWorkRouteMapVersion).toBe(recomputed.metrics.mapVersion);
   });
 });
 

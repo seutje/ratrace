@@ -9,7 +9,16 @@ import {
   WorldState,
 } from './types';
 
-export type DynamicAgentSnapshot = Omit<Agent, 'route' | 'routeIndex' | 'routeMapVersion'>;
+export type DynamicAgentSnapshot = Omit<
+  Agent,
+  | 'route'
+  | 'routeIndex'
+  | 'routeMapVersion'
+  | 'commuteToWorkRoute'
+  | 'commuteToWorkRouteMapVersion'
+  | 'commuteToHomeRoute'
+  | 'commuteToHomeRouteMapVersion'
+>;
 
 export type DynamicBuildingSnapshot = Building;
 

@@ -104,6 +104,8 @@ const cloneWorldForStep = (world: WorldState): WorldState => ({
       pos: { ...agent.pos },
       stats: { ...agent.stats },
       route: agent.route.slice(),
+      commuteToWorkRoute: agent.commuteToWorkRoute?.slice() ?? null,
+      commuteToHomeRoute: agent.commuteToHomeRoute?.slice() ?? null,
       destination: agent.destination ? { ...agent.destination } : undefined,
     })),
     buildings: world.entities.buildings.map((building) => ({
@@ -263,34 +265,162 @@ const updateEconomyTotals = (world: WorldState) => {
     world.economy.treasury + walletTotal + businessCashTotal + (stockTotal + pantryTotal + carriedMealTotal) * 2;
 };
 
-const assignRoute = (world: WorldState, agent: Agent, destination: AgentDestination, targetPoint: Point) => {
+const isOrthogonallyAdjacent = (from: Point, to: Point) => Math.abs(from.x - to.x) + Math.abs(from.y - to.y) === 1;
+
+const isRouteTraversable = (world: WorldState, path: Point[]) => {
+  for (let index = 0; index < path.length; index += 1) {
+    const point = path[index]!;
+    const tile = getTile(world, point);
+    if (!tile || tile.type === TileType.Blocked) {
+      return false;
+    }
+
+    const previousPoint = path[index - 1];
+    if (previousPoint && !isOrthogonallyAdjacent(previousPoint, point)) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const isCurrentRouteUsable = (world: WorldState, agent: Agent, targetPoint: Point) => {
+  if (agent.route.length === 0 || agent.routeIndex <= 0 || agent.routeIndex >= agent.route.length) {
+    return false;
+  }
+
+  if (!samePoint(agent.route.at(-1), targetPoint)) {
+    return false;
+  }
+
+  const currentTile = getAgentCurrentTile(agent);
+  const routeOrigin = agent.route[agent.routeIndex - 1];
+  if (!routeOrigin || !samePoint(routeOrigin, currentTile)) {
+    return false;
+  }
+
+  return isRouteTraversable(world, [currentTile, ...agent.route.slice(agent.routeIndex)]);
+};
+
+type CommuteRouteKind = 'toWork' | 'toHome';
+
+const getCommuteRouteKind = (
+  agent: Agent,
+  buildingIndex: StepBuildingIndex,
+  currentTile: Point,
+  destination: AgentDestination,
+  targetPoint: Point,
+): CommuteRouteKind | undefined => {
+  const home = getBuilding(buildingIndex, agent.homeId);
+  const work = getBuilding(buildingIndex, agent.workId);
+
+  if (
+    destination.kind === 'work' &&
+    home &&
+    work &&
+    samePoint(currentTile, home.tile) &&
+    samePoint(targetPoint, work.tile)
+  ) {
+    return 'toWork';
+  }
+
+  if (
+    destination.kind === 'home' &&
+    home &&
+    work &&
+    samePoint(currentTile, work.tile) &&
+    samePoint(targetPoint, home.tile)
+  ) {
+    return 'toHome';
+  }
+
+  return undefined;
+};
+
+const getCachedCommuteRoute = (agent: Agent, kind: CommuteRouteKind, mapVersion: number) => {
+  if (kind === 'toWork') {
+    if (agent.commuteToWorkRouteMapVersion !== mapVersion) {
+      return undefined;
+    }
+
+    return agent.commuteToWorkRoute;
+  }
+
+  if (agent.commuteToHomeRouteMapVersion !== mapVersion) {
+    return undefined;
+  }
+
+  return agent.commuteToHomeRoute;
+};
+
+const storeCachedCommuteRoute = (
+  agent: Agent,
+  kind: CommuteRouteKind,
+  mapVersion: number,
+  path: Point[] | null,
+) => {
+  if (kind === 'toWork') {
+    agent.commuteToWorkRoute = path?.slice() ?? null;
+    agent.commuteToWorkRouteMapVersion = mapVersion;
+    return;
+  }
+
+  agent.commuteToHomeRoute = path?.slice() ?? null;
+  agent.commuteToHomeRouteMapVersion = mapVersion;
+};
+
+const assignRoute = (
+  world: WorldState,
+  buildingIndex: StepBuildingIndex,
+  agent: Agent,
+  destination: AgentDestination,
+  targetPoint: Point,
+) => {
   const currentTile = getAgentCurrentTile(agent);
   const needsRecompute =
     agent.destination?.buildingId !== destination.buildingId ||
     agent.destination?.kind !== destination.kind ||
-    agent.routeMapVersion !== world.metrics.mapVersion ||
-    agent.route.length === 0 ||
-    !samePoint(agent.route.at(-1), targetPoint);
+    !isCurrentRouteUsable(world, agent, targetPoint);
 
   if (!needsRecompute) {
     return;
   }
 
-  const path = findPath(world, currentTile, targetPoint);
+  const commuteRouteKind = getCommuteRouteKind(agent, buildingIndex, currentTile, destination, targetPoint);
+  const cachedCommuteRoute = commuteRouteKind
+    ? getCachedCommuteRoute(agent, commuteRouteKind, world.metrics.mapVersion)
+    : undefined;
+  const path =
+    cachedCommuteRoute !== undefined ? cachedCommuteRoute : findPath(world, currentTile, targetPoint);
+
+  if (commuteRouteKind && cachedCommuteRoute === undefined) {
+    storeCachedCommuteRoute(agent, commuteRouteKind, world.metrics.mapVersion, path);
+  }
+
   if (!path) {
     agent.route = [];
     agent.routeIndex = 0;
+    agent.routeMapVersion = 0;
     agent.destination = undefined;
     agent.thought = 'No route available.';
     return;
   }
 
   agent.destination = destination;
-  agent.route = path;
+  agent.route = path.slice();
   agent.routeIndex = Math.min(1, Math.max(path.length - 1, 0));
-  agent.routeComputeCount += 1;
   agent.routeMapVersion = world.metrics.mapVersion;
-  world.metrics.pathComputations += 1;
+
+  if (cachedCommuteRoute === undefined) {
+    agent.routeComputeCount += 1;
+    world.metrics.pathComputations += 1;
+  }
+};
+
+const clearAgentRoute = (agent: Agent) => {
+  agent.route = [];
+  agent.routeIndex = 0;
+  agent.routeMapVersion = 0;
 };
 
 const moveAxisToward = (current: number, target: number, maxStep: number) => {
@@ -791,12 +921,11 @@ const routeAgent = (
   }
   const destination = determineDestination(world, buildingIndex, staffedCommercialCounts, shopSearchState, agent);
   if (!destination) {
-      if (home && isOnBuildingTile(agent, home) && agent.state !== AgentState.Sleeping) {
-        consumePantryMeal(agent, home);
-      }
+    if (home && isOnBuildingTile(agent, home) && agent.state !== AgentState.Sleeping) {
+      consumePantryMeal(agent, home);
+    }
     agent.destination = undefined;
-    agent.route = [];
-    agent.routeIndex = 0;
+    clearAgentRoute(agent);
     agent.state = AgentState.Idle;
     const staffedAfter = getStaffedCommercialBuildingId(world, buildingIndex, agent, currentTile);
     if (staffedBefore !== staffedAfter) {
@@ -821,14 +950,13 @@ const routeAgent = (
 
   if (currentTile.x === building.tile.x && currentTile.y === building.tile.y) {
     agent.destination = destination;
-    agent.route = [];
-    agent.routeIndex = 0;
+    clearAgentRoute(agent);
     arriveAtBuilding(agent, building, buildingIndex, staffedCommercialCounts, shopSearchState, world);
     return;
   }
 
   applyDestinationState(agent, destination);
-  assignRoute(world, agent, destination, building.tile);
+  assignRoute(world, buildingIndex, agent, destination, building.tile);
   moveAgent(world, agent, reservations);
 
   const arrivedTile = getAgentCurrentTile(agent);
@@ -1017,6 +1145,10 @@ const createHouseholdGrowthAgent = (world: WorldState, home: Building, assignmen
   routeIndex: 0,
   routeComputeCount: 0,
   routeMapVersion: world.metrics.mapVersion,
+  commuteToWorkRoute: null,
+  commuteToWorkRouteMapVersion: 0,
+  commuteToHomeRoute: null,
+  commuteToHomeRouteMapVersion: 0,
   destination: undefined,
   lastShoppedTick: undefined,
   sleepUntilTick: undefined,
