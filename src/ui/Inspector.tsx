@@ -18,35 +18,71 @@ type InspectorProps = {
   onFollowToggle: () => void;
 };
 
+type RelationshipEntry = {
+  id: string;
+  name: string;
+};
+
+const getRelationshipEntries = (agentIds: string[], namesById: Map<string, string>) =>
+  Array.from(new Set(agentIds)).map((agentId) => ({
+    id: agentId,
+    name: namesById.get(agentId) ?? agentId,
+  }));
+
+const RelationshipList = ({
+  entries,
+  onSelect,
+}: {
+  entries: RelationshipEntry[];
+  onSelect: (agentId: string) => void;
+}) => {
+  if (entries.length === 0) {
+    return <dd className="max-w-[13rem] text-right">None</dd>;
+  }
+
+  return (
+    <dd className="max-w-[13rem] text-right">
+      {entries.map((entry, index) => (
+        <span key={entry.id}>
+          {index > 0 ? ', ' : null}
+          <button
+            type="button"
+            className="cursor-pointer border-0 bg-transparent p-0 text-inherit underline decoration-[rgba(40,26,17,0.4)] underline-offset-2 transition-colors duration-150 ease-out hover:text-[#8f2c1a]"
+            onClick={() => onSelect(entry.id)}
+          >
+            {entry.name}
+          </button>
+        </span>
+      ))}
+    </dd>
+  );
+};
+
 export const Inspector = ({ followActive, onFollowToggle }: InspectorProps) => {
   const selectedAgentId = useWorldStore((state) => state.world.selectedAgentId);
   const selectedAgentSnapshot = useWorldStore((state) => state.selectedAgentSnapshot);
+  const worldAgents = useWorldStore((state) => state.world.entities.agents);
+  const buildings = useWorldStore((state) => state.world.entities.buildings);
+  const selectAgent = useWorldStore((state) => state.selectAgent);
   const agent = useWorldStore((state) =>
     selectedAgentSnapshot?.id === selectedAgentId
       ? selectedAgentSnapshot
       : state.world.entities.agents.find((entry) => entry.id === selectedAgentId),
   );
-  const home = useWorldStore((state) => {
-    if (!agent) {
-      return undefined;
-    }
-
-    return state.world.entities.buildings.find((building) => building.id === agent.homeId);
-  });
-  const homeLabel = useWorldStore((state) => {
-    if (!agent) {
-      return 'None';
-    }
-
-    return state.world.entities.buildings.find((building) => building.id === agent.homeId)?.label ?? 'None';
-  });
-  const workLabel = useWorldStore((state) => {
-    if (!agent) {
-      return 'None';
-    }
-
-    return state.world.entities.buildings.find((building) => building.id === agent.workId)?.label ?? 'None';
-  });
+  const buildingsById = new Map(buildings.map((building) => [building.id, building]));
+  const agentNamesById = new Map(worldAgents.map((entry) => [entry.id, entry.name]));
+  const home = agent ? buildingsById.get(agent.homeId) : undefined;
+  const homeLabel = home?.label ?? 'None';
+  const workLabel = agent ? buildingsById.get(agent.workId)?.label ?? 'None' : 'None';
+  const roommates = agent
+    ? worldAgents
+        .filter((entry) => entry.homeId === agent.homeId && entry.id !== agent.id)
+        .map((entry) => ({ id: entry.id, name: entry.name }))
+        .sort((left, right) => left.name.localeCompare(right.name))
+    : [];
+  const parents = agent ? getRelationshipEntries(agent.parentIds, agentNamesById) : [];
+  const children = agent ? getRelationshipEntries(agent.childIds, agentNamesById) : [];
+  const coParents = agent ? getRelationshipEntries(agent.coParentIds, agentNamesById) : [];
 
   return (
     <section className={`${panelClass} grid gap-3`}>
@@ -107,6 +143,22 @@ export const Inspector = ({ followActive, onFollowToggle }: InspectorProps) => {
             <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
               <dt className={labelClass}>Work</dt>
               <dd>{workLabel}</dd>
+            </div>
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Roommates</dt>
+              <RelationshipList entries={roommates} onSelect={selectAgent} />
+            </div>
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Had Child With</dt>
+              <RelationshipList entries={coParents} onSelect={selectAgent} />
+            </div>
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Children</dt>
+              <RelationshipList entries={children} onSelect={selectAgent} />
+            </div>
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Parents</dt>
+              <RelationshipList entries={parents} onSelect={selectAgent} />
             </div>
             <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
               <dt className={labelClass}>Pantry</dt>

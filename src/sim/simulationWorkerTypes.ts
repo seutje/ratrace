@@ -38,8 +38,11 @@ export const toDynamicAgentSnapshot = (agent: Agent): DynamicAgentSnapshot => {
 
   return {
     ...snapshot,
+    childIds: agent.childIds.slice(),
+    coParentIds: agent.coParentIds.slice(),
     destination: agent.destination ? { ...agent.destination } : undefined,
     memory: { ...agent.memory },
+    parentIds: agent.parentIds.slice(),
     pos: { ...agent.pos },
     stats: { ...agent.stats },
     traits: { ...agent.traits },

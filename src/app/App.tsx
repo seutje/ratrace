@@ -445,7 +445,7 @@ export const App = () => {
         </Drawer>
         <Drawer
           title="Inspector"
-          className="right-[18px] top-[18px] w-[min(360px,calc(100vw-32px))] max-[960px]:bottom-[18px] max-[960px]:left-[18px] max-[960px]:right-auto max-[960px]:top-auto max-[960px]:w-[min(320px,calc(100vw-36px))] max-[720px]:top-[344px] max-[720px]:bottom-auto max-[720px]:w-[calc(100vw-24px)]"
+          className="right-[18px] top-[18px] max-h-[calc(100vh-36px)] w-[min(360px,calc(100vw-32px))] max-[960px]:bottom-[18px] max-[960px]:left-[18px] max-[960px]:right-auto max-[960px]:top-auto max-[960px]:w-[min(320px,calc(100vw-36px))] max-[720px]:top-[344px] max-[720px]:bottom-auto max-[720px]:max-h-[calc(100vh-356px)] max-[720px]:w-[calc(100vw-24px)]"
         >
           <Inspector
             followActive={followAgent}

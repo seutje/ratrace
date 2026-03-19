@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from '../app/App';
 import { useWorldStore } from '../app/store';
+import { Inspector } from '../ui/Inspector';
 
 describe('App', () => {
   beforeEach(() => {
@@ -70,5 +71,79 @@ describe('App', () => {
     await waitFor(() => {
       expect(followButton).toHaveAttribute('aria-pressed', 'false');
     });
+  });
+
+  it('shows family and roommate relationships in the inspector', () => {
+    const world = structuredClone(useWorldStore.getState().world);
+    const [selected, roommate, coParent, childA, childB, parentA, parentB] = world.entities.agents;
+
+    selected!.name = 'Selected Agent';
+    roommate!.name = 'Room Mate';
+    coParent!.name = 'Co Parent';
+    childA!.name = 'Kid Alpha';
+    childB!.name = 'Kid Beta';
+    parentA!.name = 'Parent One';
+    parentB!.name = 'Parent Two';
+
+    roommate!.homeId = selected!.homeId;
+    coParent!.homeId = parentA!.homeId;
+    childA!.homeId = parentA!.homeId;
+    childB!.homeId = parentB!.homeId;
+    selected!.coParentIds = [coParent!.id];
+    selected!.childIds = [childA!.id, childB!.id];
+    selected!.parentIds = [parentA!.id, parentB!.id];
+    coParent!.coParentIds = [selected!.id];
+    coParent!.childIds = [childA!.id, childB!.id];
+    childA!.parentIds = [selected!.id, coParent!.id];
+    childB!.parentIds = [selected!.id, coParent!.id];
+
+    useWorldStore.setState({
+      selectedAgentSnapshot: undefined,
+      world: {
+        ...world,
+        selectedAgentId: selected!.id,
+      },
+    });
+
+    render(<Inspector followActive={false} onFollowToggle={() => undefined} />);
+
+    expect(screen.getByRole('button', { name: 'Room Mate' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Co Parent' }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Kid Alpha' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Kid Beta' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Parent One' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Parent Two' })).toBeInTheDocument();
+  });
+
+  it('retargets the inspector when a relationship name is clicked', () => {
+    const world = structuredClone(useWorldStore.getState().world);
+    const [selected, roommate, coParent, childA] = world.entities.agents;
+
+    selected!.name = 'Selected Agent';
+    roommate!.name = 'Room Mate';
+    coParent!.name = 'Co Parent';
+    childA!.name = 'Kid Alpha';
+
+    roommate!.homeId = selected!.homeId;
+    coParent!.homeId = roommate!.homeId;
+    childA!.homeId = world.entities.agents[4]!.homeId;
+    selected!.coParentIds = [coParent!.id];
+    selected!.childIds = [childA!.id];
+    coParent!.coParentIds = [selected!.id];
+
+    useWorldStore.setState({
+      selectedAgentSnapshot: undefined,
+      world: {
+        ...world,
+        selectedAgentId: selected!.id,
+      },
+    });
+
+    render(<Inspector followActive={false} onFollowToggle={() => undefined} />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Co Parent' })[0]!);
+
+    expect(useWorldStore.getState().world.selectedAgentId).toBe(coParent!.id);
+    expect(screen.getByText('Co Parent', { selector: 'strong' })).toBeInTheDocument();
   });
 });

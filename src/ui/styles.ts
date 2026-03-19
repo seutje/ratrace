@@ -42,6 +42,8 @@ export const selectedButtonClass =
 export const drawerClass = [
   'pointer-events-auto',
   'absolute',
+  'flex',
+  'flex-col',
   'overflow-hidden',
   'rounded-[22px]',
   'border',
@@ -67,7 +69,8 @@ export const drawerHeaderClass = [
   'min-[721px]:pt-4',
 ].join(' ');
 
-export const drawerBodyClass = 'px-3 pb-3 min-[721px]:px-4 min-[721px]:pb-4';
+export const drawerBodyClass =
+  'min-h-0 overflow-y-auto px-3 pb-3 min-[721px]:px-4 min-[721px]:pb-4';
 
 export const drawerPillClass =
   'inline-flex items-center rounded-full bg-[#231811] px-[11px] py-[7px] font-mono text-[0.76rem] text-[#fbf5e9]';

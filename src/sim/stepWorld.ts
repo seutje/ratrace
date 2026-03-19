@@ -102,8 +102,11 @@ const cloneWorldForStep = (world: WorldState): WorldState => ({
   entities: {
     agents: world.entities.agents.map((agent) => ({
       ...agent,
+      childIds: agent.childIds.slice(),
+      coParentIds: agent.coParentIds.slice(),
       traits: { ...agent.traits },
       memory: { ...agent.memory },
+      parentIds: agent.parentIds.slice(),
       pos: { ...agent.pos },
       stats: { ...agent.stats },
       route: agent.route.slice(),
@@ -1229,6 +1232,12 @@ const qualifiesForHouseholdGrowth = (agent: Agent) =>
   agent.memory.recentHardshipDays === 0 &&
   agent.memory.unpaidHours < 4;
 
+const appendUniqueRelationship = (relationships: string[], relatedAgentId: string) => {
+  if (!relationships.includes(relatedAgentId)) {
+    relationships.push(relatedAgentId);
+  }
+};
+
 const createHouseholdGrowthAgent = (
   world: WorldState,
   home: Building,
@@ -1253,6 +1262,9 @@ const createHouseholdGrowthAgent = (
   memory: createAgentMemory(),
   homeId: home.id,
   workId: assignment.workId,
+  parentIds: [firstParent.id, secondParent.id],
+  childIds: [],
+  coParentIds: [],
   state: AgentState.Idle,
   thought: 'New to the household.',
   route: [],
@@ -1277,6 +1289,13 @@ const createHouseholdGrowthAgent = (
   maxHungerStreakDays: 0,
   keptMaxHungerToday: false,
 });
+
+const recordHouseholdGrowthRelationships = (firstParent: Agent, secondParent: Agent, child: Agent) => {
+  appendUniqueRelationship(firstParent.childIds, child.id);
+  appendUniqueRelationship(secondParent.childIds, child.id);
+  appendUniqueRelationship(firstParent.coParentIds, secondParent.id);
+  appendUniqueRelationship(secondParent.coParentIds, firstParent.id);
+};
 
 const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingIndex) => {
   if (world.minutesOfDay !== 0) {
@@ -1382,7 +1401,9 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
       firstParent.wallet -= HOUSEHOLD_GROWTH_COST;
       secondParent.wallet -= HOUSEHOLD_GROWTH_COST;
       world.economy.treasury += HOUSEHOLD_GROWTH_COST * 2;
-      world.entities.agents.push(createHouseholdGrowthAgent(world, targetHome, assignment, firstParent, secondParent));
+      const child = createHouseholdGrowthAgent(world, targetHome, assignment, firstParent, secondParent);
+      recordHouseholdGrowthRelationships(firstParent, secondParent, child);
+      world.entities.agents.push(child);
       occupied.set(targetHome.id, (occupied.get(targetHome.id) ?? 0) + 1);
       const targetResidents = households.get(targetHome.id);
       if (targetResidents) {

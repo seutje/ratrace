@@ -78,6 +78,9 @@ const makeTestAgent = (overrides: Partial<WorldState['entities']['agents'][numbe
   memory: { ...freshMemory },
   homeId: 'home',
   workId: 'work',
+  parentIds: [],
+  childIds: [],
+  coParentIds: [],
   state: AgentState.Idle,
   thought: 'Testing.',
   route: [],
@@ -1665,6 +1668,11 @@ describe('traffic and lifecycle', () => {
     expect(next.entities.agents[2]!.name).toMatch(agentNamePattern);
     expect(next.entities.agents[2]!.name.startsWith('Resident ')).toBe(false);
     expect(next.entities.agents[2]!.thought).toBe('New to the household.');
+    expect(next.entities.agents[2]!.parentIds).toEqual(['agent-1', 'agent-2']);
+    expect(next.entities.agents[0]!.childIds).toEqual([next.entities.agents[2]!.id]);
+    expect(next.entities.agents[1]!.childIds).toEqual([next.entities.agents[2]!.id]);
+    expect(next.entities.agents[0]!.coParentIds).toEqual(['agent-2']);
+    expect(next.entities.agents[1]!.coParentIds).toEqual(['agent-1']);
   });
 
   it('limits household growth to one new resident per household each day', () => {

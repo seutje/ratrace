@@ -94,6 +94,9 @@ export type Agent = {
   memory: AgentMemory;
   homeId: string;
   workId: string;
+  parentIds: string[];
+  childIds: string[];
+  coParentIds: string[];
   state: AgentState;
   thought: string;
   route: Point[];
