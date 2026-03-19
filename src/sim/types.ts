@@ -29,6 +29,11 @@ export enum AgentState {
   Wandering = 'WANDERING',
 }
 
+export enum AgentSex {
+  Female = 'FEMALE',
+  Male = 'MALE',
+}
+
 export type Tile = {
   x: number;
   y: number;
@@ -86,6 +91,7 @@ export type AgentDestination = {
 export type Agent = {
   id: string;
   name: string;
+  sex: AgentSex;
   pos: Point;
   wallet: number;
   carriedMeals: number;

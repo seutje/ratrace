@@ -23,7 +23,7 @@ import {
   WORK_SHIFT_MINUTES,
   ticksPerSecond,
 } from '../sim/constants';
-import { BuildingKind, AgentState, TileType, WorldState } from '../sim/types';
+import { AgentSex, BuildingKind, AgentState, TileType, WorldState } from '../sim/types';
 import { findPath } from '../sim/pathfinding';
 import { getCongestionSpeedFactor } from '../sim/traffic';
 import { getAgentTrafficKey, getRouteTargetPoint } from '../sim/lanes';
@@ -70,6 +70,7 @@ const orthogonalNeighbors = ({ x, y }: { x: number; y: number }) => [
 const makeTestAgent = (overrides: Partial<WorldState['entities']['agents'][number]> = {}) => ({
   id: 'test-agent',
   name: 'Test Agent',
+  sex: AgentSex.Female,
   pos: { x: 0.5, y: 0.5 },
   wallet: 20,
   carriedMeals: 0,
@@ -186,6 +187,7 @@ describe('world generation', () => {
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Industrial)).toBe(true);
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Residential && building.pantryCapacity > 0)).toBe(true);
     expect(world.entities.agents.every((agent) => agent.memory.averageCommuteMinutes === 0)).toBe(true);
+    expect(world.entities.agents.every((agent) => agent.sex === AgentSex.Female || agent.sex === AgentSex.Male)).toBe(true);
     expect(new Set(world.entities.agents.slice(0, 50).map((agent) => agent.traits.appetite)).size).toBeGreaterThan(1);
   });
 
@@ -1640,6 +1642,7 @@ describe('traffic and lifecycle', () => {
     world.entities.agents = [
       makeTestAgent({
         id: 'agent-1',
+        sex: AgentSex.Female,
         homeId: 'home',
         workId: 'work',
         pos: tileCenter({ x: 0, y: 0 }),
@@ -1648,6 +1651,7 @@ describe('traffic and lifecycle', () => {
       }),
       makeTestAgent({
         id: 'agent-2',
+        sex: AgentSex.Male,
         homeId: 'home',
         workId: 'work',
         pos: tileCenter({ x: 0, y: 0 }),
@@ -1667,6 +1671,7 @@ describe('traffic and lifecycle', () => {
     expect(next.entities.agents[2]!.workId).toBe('work');
     expect(next.entities.agents[2]!.name).toMatch(agentNamePattern);
     expect(next.entities.agents[2]!.name.startsWith('Resident ')).toBe(false);
+    expect(next.entities.agents[2]!.sex === AgentSex.Female || next.entities.agents[2]!.sex === AgentSex.Male).toBe(true);
     expect(next.entities.agents[2]!.thought).toBe('New to the household.');
     expect(next.entities.agents[2]!.parentIds).toEqual(['agent-1', 'agent-2']);
     expect(next.entities.agents[0]!.childIds).toEqual([next.entities.agents[2]!.id]);
@@ -1707,6 +1712,7 @@ describe('traffic and lifecycle', () => {
     world.entities.agents = ['agent-1', 'agent-2', 'agent-3', 'agent-4'].map((id) =>
       makeTestAgent({
         id,
+        sex: id === 'agent-1' || id === 'agent-3' ? AgentSex.Female : AgentSex.Male,
         homeId: 'home',
         workId: 'work',
         pos: tileCenter({ x: 0, y: 0 }),
@@ -1721,6 +1727,64 @@ describe('traffic and lifecycle', () => {
     expect(next.entities.agents).toHaveLength(5);
     expect(next.entities.agents.filter((agent) => agent.wallet === 0)).toHaveLength(2);
     expect(next.economy.treasury).toBe(world.economy.treasury + HOUSEHOLD_GROWTH_COST * 2);
+  });
+
+  it('blocks household growth for same-sex households', () => {
+    const world = createBlankWorld(4, 1);
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Industrial, buildingId: 'work' });
+    world.entities.buildings.push(
+      {
+        id: 'home',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 3,
+        pantryStock: 6,
+        pantryCapacity: 6,
+        label: 'home',
+      },
+      {
+        id: 'work',
+        kind: BuildingKind.Industrial,
+        tile: { x: 1, y: 0 },
+        cash: INDUSTRIAL_STARTING_CASH,
+        stock: 0,
+        capacity: 4,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'work',
+      },
+    );
+    world.metrics.populationCapacity = 3;
+    world.entities.agents = [
+      makeTestAgent({
+        id: 'agent-1',
+        sex: AgentSex.Female,
+        homeId: 'home',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 0 }),
+        wallet: HOUSEHOLD_GROWTH_COST,
+        stats: { hunger: 10, energy: 90, happiness: 80 },
+      }),
+      makeTestAgent({
+        id: 'agent-2',
+        sex: AgentSex.Female,
+        homeId: 'home',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 0 }),
+        wallet: HOUSEHOLD_GROWTH_COST,
+        stats: { hunger: 10, energy: 90, happiness: 80 },
+      }),
+    ];
+    world.minutesOfDay = 23 * 60 + 59;
+
+    const next = stepWorld(world);
+
+    expect(next.entities.agents).toHaveLength(2);
+    expect(next.entities.agents.every((agent) => agent.wallet === HOUSEHOLD_GROWTH_COST)).toBe(true);
+    expect(next.economy.treasury).toBe(world.economy.treasury);
   });
 
   it('remains stable over a longer deterministic soak', () => {

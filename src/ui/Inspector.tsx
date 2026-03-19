@@ -1,4 +1,4 @@
-import { AgentState } from '../sim/types';
+import { AgentSex, AgentState } from '../sim/types';
 import { useWorldStore } from '../app/store';
 import { buttonClass, cx, labelClass, panelClass, panelHeadingClass, selectedButtonClass } from './styles';
 
@@ -11,6 +11,11 @@ const stateColors: Record<AgentState, string> = {
   [AgentState.MovingToShop]: '#6252ab',
   [AgentState.Shopping]: '#2d8580',
   [AgentState.Wandering]: '#76532d',
+};
+
+const sexLabels: Record<AgentSex, string> = {
+  [AgentSex.Female]: 'Female',
+  [AgentSex.Male]: 'Male',
 };
 
 type InspectorProps = {
@@ -108,6 +113,10 @@ export const Inspector = ({ followActive, onFollowToggle }: InspectorProps) => {
           </button>
           <p className="m-0 italic text-[#5b4837]">"{agent.thought}"</p>
           <dl className="m-0 grid gap-2.5">
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Sex</dt>
+              <dd>{sexLabels[agent.sex]}</dd>
+            </div>
             <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
               <dt className={labelClass}>Wallet</dt>
               <dd>${agent.wallet}</dd>

@@ -33,7 +33,7 @@ import {
   gameMinutesPerTick,
   msPerTick,
 } from './constants';
-import { createAgentMemory, createInheritedAgentTraits } from './agents';
+import { createAgentMemory, createInheritedAgentTraits, createSeededAgentSex } from './agents';
 import { pickEmploymentAssignment } from './employment';
 import { findPath } from './pathfinding';
 import { getCongestionSpeedFactor } from './traffic';
@@ -41,6 +41,7 @@ import {
   Agent,
   AgentDestination,
   AgentState,
+  AgentSex,
   Building,
   BuildingKind,
   Point,
@@ -1238,6 +1239,33 @@ const appendUniqueRelationship = (relationships: string[], relatedAgentId: strin
   }
 };
 
+const areOpposingSexes = (first: Agent, second: Agent) => first.sex !== second.sex;
+
+const getHouseholdGrowthScore = (agent: Agent) =>
+  agent.wallet - HOUSEHOLD_GROWTH_WALLET_THRESHOLD +
+  (agent.stats.happiness - HOUSEHOLD_GROWTH_HAPPINESS_THRESHOLD) * 10;
+
+const getEligibleHouseholdGrowthPair = (residents: Agent[]) => {
+  const eligibleResidents = residents
+    .filter(qualifiesForHouseholdGrowth)
+    .sort(
+      (left, right) =>
+        getHouseholdGrowthScore(right) - getHouseholdGrowthScore(left) || left.id.localeCompare(right.id),
+    );
+
+  for (let leftIndex = 0; leftIndex < eligibleResidents.length; leftIndex += 1) {
+    const firstParent = eligibleResidents[leftIndex]!;
+    for (let rightIndex = leftIndex + 1; rightIndex < eligibleResidents.length; rightIndex += 1) {
+      const secondParent = eligibleResidents[rightIndex]!;
+      if (areOpposingSexes(firstParent, secondParent)) {
+        return [firstParent, secondParent] as const;
+      }
+    }
+  }
+
+  return undefined;
+};
+
 const createHouseholdGrowthAgent = (
   world: WorldState,
   home: Building,
@@ -1247,6 +1275,16 @@ const createHouseholdGrowthAgent = (
 ) => ({
   id: nextAgentId(world),
   name: createRuntimeAgentName(world, home.tile, assignment.shiftStartMinute),
+  sex: createSeededAgentSex(world.seed, [
+    world.day,
+    world.tick,
+    world.entities.agents.length + 1,
+    home.tile.x,
+    home.tile.y,
+    assignment.shiftStartMinute,
+    firstParent.sex === AgentSex.Female ? 1 : 2,
+    secondParent.sex === AgentSex.Female ? 1 : 2,
+  ]),
   pos: { x: home.tile.x + 0.5, y: home.tile.y + 0.5 },
   wallet: 18,
   carriedMeals: 0,
@@ -1340,24 +1378,18 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
 
     const growthHomes = homes.filter((home) => {
       const residents = households.get(home.id) ?? [];
-      return residents.filter(qualifiesForHouseholdGrowth).length >= 2;
+      return getEligibleHouseholdGrowthPair(residents) !== undefined;
     });
 
     growthHomes.sort((left, right) => {
       const leftResidents = households.get(left.id) ?? [];
       const rightResidents = households.get(right.id) ?? [];
       const leftSurplus = leftResidents.reduce(
-        (sum, agent) =>
-          sum +
-          Math.max(0, agent.wallet - HOUSEHOLD_GROWTH_WALLET_THRESHOLD) +
-          Math.max(0, agent.stats.happiness - HOUSEHOLD_GROWTH_HAPPINESS_THRESHOLD) * 10,
+        (sum, agent) => sum + Math.max(0, getHouseholdGrowthScore(agent)),
         0,
       );
       const rightSurplus = rightResidents.reduce(
-        (sum, agent) =>
-          sum +
-          Math.max(0, agent.wallet - HOUSEHOLD_GROWTH_WALLET_THRESHOLD) +
-          Math.max(0, agent.stats.happiness - HOUSEHOLD_GROWTH_HAPPINESS_THRESHOLD) * 10,
+        (sum, agent) => sum + Math.max(0, getHouseholdGrowthScore(agent)),
         0,
       );
 
@@ -1369,15 +1401,9 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
         break;
       }
 
-      const residents = (households.get(home.id) ?? [])
-        .filter(qualifiesForHouseholdGrowth)
-        .sort(
-          (left, right) =>
-            right.wallet - left.wallet ||
-            right.stats.happiness - left.stats.happiness ||
-            left.id.localeCompare(right.id),
-        );
-      if (residents.length < 2) {
+      const residents = households.get(home.id) ?? [];
+      const parentPair = getEligibleHouseholdGrowthPair(residents);
+      if (!parentPair) {
         continue;
       }
 
@@ -1397,7 +1423,7 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
         break;
       }
 
-      const [firstParent, secondParent] = residents;
+      const [firstParent, secondParent] = parentPair;
       firstParent.wallet -= HOUSEHOLD_GROWTH_COST;
       secondParent.wallet -= HOUSEHOLD_GROWTH_COST;
       world.economy.treasury += HOUSEHOLD_GROWTH_COST * 2;

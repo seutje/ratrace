@@ -14,7 +14,7 @@ import {
   STARTER_RESIDENTIAL_CAPACITY,
   STARTER_ROAD_SPACING,
 } from './constants';
-import { createAgentMemory, createAgentTraits } from './agents';
+import { createAgentMemory, createAgentSex, createAgentTraits } from './agents';
 import { createEmploymentAssignments } from './employment';
 import { createRng } from './random';
 import { createAgentName, createBuildingLabel } from './naming';
@@ -351,6 +351,7 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED, population = START
     return {
       id: `agent-${index + 1}`,
       name: createAgentName(rng),
+      sex: createAgentSex(rng),
       pos: { x: home.tile.x + 0.5, y: home.tile.y + 0.5 },
       wallet: 20 + Math.floor(rng() * 20),
       carriedMeals: 0,

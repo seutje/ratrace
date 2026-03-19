@@ -1,5 +1,5 @@
 import { createRng, Rng } from './random';
-import { Agent, AgentMemory, AgentTraits } from './types';
+import { Agent, AgentMemory, AgentSex, AgentTraits } from './types';
 
 const TRAIT_MIN = 0.8;
 const TRAIT_MAX = 1.2;
@@ -24,6 +24,8 @@ const mixSeed = (seed: number, ...parts: number[]) => {
 const blendTrait = (left: number, right: number, rng: Rng) =>
   clampTrait((left + right) / 2 + (rng() - 0.5) * TRAIT_MUTATION_RANGE);
 
+export const createAgentSex = (rng: Rng): AgentSex => (rng() < 0.5 ? AgentSex.Female : AgentSex.Male);
+
 export const createAgentTraits = (rng: Rng): AgentTraits => ({
   appetite: createTrait(rng),
   stamina: createTrait(rng),
@@ -46,6 +48,9 @@ export const createInheritedAgentTraits = (
     resilience: blendTrait(firstParent.traits.resilience, secondParent.traits.resilience, rng),
   };
 };
+
+export const createSeededAgentSex = (seed: number, saltParts: number[]): AgentSex =>
+  createAgentSex(createRng(mixSeed(seed, ...saltParts)));
 
 export const createAgentMemory = (): AgentMemory => ({
   averageCommuteMinutes: 0,
