@@ -77,7 +77,6 @@ export const App = () => {
   const [size, setSize] = useState<CanvasSize>({ width: 960, height: 640 });
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [pan, setPan] = useState<PanOffset>({ x: 0, y: 0 });
-  const [isPanning, setIsPanning] = useState(false);
   const [followAgent, setFollowAgent] = useState(false);
 
   const worldWidth = useWorldStore((state) => state.world.width);
@@ -295,7 +294,6 @@ export const App = () => {
       originPan: panRef.current,
       moved: false,
     };
-    setIsPanning(true);
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
@@ -335,7 +333,6 @@ export const App = () => {
     }
 
     dragStateRef.current = null;
-    setIsPanning(false);
 
     if (!dragState.moved) {
       setPan(dragState.originPan);
@@ -354,7 +351,6 @@ export const App = () => {
     }
 
     dragStateRef.current = null;
-    setIsPanning(false);
     setPan(dragState.originPan);
   };
 
