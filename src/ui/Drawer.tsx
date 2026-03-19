@@ -1,4 +1,13 @@
 import { useState, type ReactNode } from 'react';
+import {
+  buttonClass,
+  cx,
+  displayHeadingClass,
+  drawerBodyClass,
+  drawerClass,
+  drawerHeaderClass,
+  labelClass,
+} from './styles';
 
 type DrawerProps = {
   title: string;
@@ -13,17 +22,17 @@ export const Drawer = ({ title, className, defaultOpen = true, summary, children
   const toggleLabel = `${open ? 'Hide' : 'Show'} ${title}`;
 
   return (
-    <section className={`drawer ${open ? 'open' : 'collapsed'} ${className ?? ''}`.trim()}>
-      <header className="drawer-header">
-        <div>
-          <span className="label">Drawer</span>
-          <h2>{title}</h2>
+    <section className={cx(drawerClass, className, !open && 'w-auto')}>
+      <header className={drawerHeaderClass}>
+        <div className="min-w-0">
+          <span className={labelClass}>Drawer</span>
+          <h2 className={cx(displayHeadingClass, 'm-0')}>{title}</h2>
         </div>
-        <div className="drawer-actions">
+        <div className="flex items-center gap-2.5">
           {summary}
           <button
             type="button"
-            className="drawer-toggle"
+            className={cx(buttonClass, 'min-w-[76px]')}
             aria-label={toggleLabel}
             onClick={() => setOpen((currentOpen) => !currentOpen)}
           >
@@ -31,7 +40,7 @@ export const Drawer = ({ title, className, defaultOpen = true, summary, children
           </button>
         </div>
       </header>
-      <div className="drawer-body" hidden={!open}>
+      <div className={drawerBodyClass} hidden={!open}>
         {children}
       </div>
     </section>

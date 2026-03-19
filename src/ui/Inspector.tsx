@@ -1,5 +1,6 @@
 import { AgentState } from '../sim/types';
 import { useWorldStore } from '../app/store';
+import { labelClass, panelClass, panelHeadingClass } from './styles';
 
 const stateColors: Record<AgentState, string> = {
   [AgentState.Idle]: '#3d4738',
@@ -43,56 +44,61 @@ export const Inspector = () => {
   });
 
   return (
-    <section className="panel inspector">
-      <h2>Inspector</h2>
+    <section className={`${panelClass} grid gap-3`}>
+      <h2 className={panelHeadingClass}>Inspector</h2>
       {agent ? (
-        <div>
-          <div className="inspector-title">
+        <div className="grid gap-3">
+          <div className="flex items-center justify-between gap-3">
             <strong>{agent.name}</strong>
-            <span style={{ backgroundColor: stateColors[agent.state] }}>{agent.state}</span>
+            <span
+              className="rounded-full px-[10px] py-1.5 font-mono text-[0.78rem] text-[#fffdf6]"
+              style={{ backgroundColor: stateColors[agent.state] }}
+            >
+              {agent.state}
+            </span>
           </div>
-          <p className="thought">"{agent.thought}"</p>
-          <dl>
-            <div>
-              <dt>Wallet</dt>
+          <p className="m-0 italic text-[#5b4837]">"{agent.thought}"</p>
+          <dl className="m-0 grid gap-2.5">
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Wallet</dt>
               <dd>${agent.wallet}</dd>
             </div>
-            <div>
-              <dt>Lunches</dt>
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Lunches</dt>
               <dd>{agent.carriedMeals}</dd>
             </div>
-            <div>
-              <dt>Hunger</dt>
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Hunger</dt>
               <dd>{agent.stats.hunger.toFixed(1)}</dd>
             </div>
-            <div>
-              <dt>Energy</dt>
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Energy</dt>
               <dd>{agent.stats.energy.toFixed(1)}</dd>
             </div>
-            <div>
-              <dt>Happiness</dt>
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Happiness</dt>
               <dd>{agent.stats.happiness.toFixed(1)}</dd>
             </div>
-            <div>
-              <dt>Home</dt>
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Home</dt>
               <dd>{homeLabel}</dd>
             </div>
-            <div>
-              <dt>Work</dt>
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Work</dt>
               <dd>{workLabel}</dd>
             </div>
-            <div>
-              <dt>Pantry</dt>
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Pantry</dt>
               <dd>{home ? `${home.pantryStock}/${home.pantryCapacity}` : 'None'}</dd>
             </div>
-            <div>
-              <dt>Path Count</dt>
+            <div className="flex justify-between gap-2.5">
+              <dt className={labelClass}>Path Count</dt>
               <dd>{agent.routeComputeCount}</dd>
             </div>
           </dl>
         </div>
       ) : (
-        <p className="empty-state">Click an agent on the canvas to inspect them.</p>
+        <p className="m-0 text-[#5b4837]">Click an agent on the canvas to inspect them.</p>
       )}
     </section>
   );

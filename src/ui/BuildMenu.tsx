@@ -1,4 +1,5 @@
 import { BuildMode, TileType } from '../sim/types';
+import { buttonClass, cx, panelClass, panelHeadingClass, selectedButtonClass } from './styles';
 
 type BuildMenuProps = {
   mode: BuildMode;
@@ -15,14 +16,15 @@ const options: { mode: BuildMode; label: string }[] = [
 
 export const BuildMenu = ({ mode, onChange }: BuildMenuProps) => {
   return (
-    <section className="panel">
-      <h2>Build Menu</h2>
-      <div className="build-grid">
+    <section className={panelClass}>
+      <h2 className={panelHeadingClass}>Build Menu</h2>
+      <div className="grid gap-2.5 min-[721px]:grid-cols-2">
         {options.map((option) => (
           <button
             key={option.label}
             type="button"
-            className={option.mode === mode ? 'selected' : undefined}
+            className={cx(buttonClass, option.mode === mode && selectedButtonClass)}
+            aria-pressed={option.mode === mode}
             onClick={() => onChange(option.mode)}
           >
             {option.label}

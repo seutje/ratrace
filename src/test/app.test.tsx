@@ -36,6 +36,6 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Traffic' }));
 
     expect(useWorldStore.getState().overlayMode).toBe('traffic');
-    expect(screen.getByRole('button', { name: 'Traffic' })).toHaveClass('selected');
+    expect(screen.getByRole('button', { name: 'Traffic' })).toHaveAttribute('aria-pressed', 'true');
   });
 });

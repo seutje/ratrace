@@ -1,3 +1,5 @@
+import { buttonClass, cx, labelClass, panelClass, panelHeadingClass } from './styles';
+
 type ControlsProps = {
   paused: boolean;
   zoom: number;
@@ -24,32 +26,32 @@ export const Controls = ({
   onZoomReset,
 }: ControlsProps) => {
   return (
-    <section className="panel controls">
-      <h2>Simulation</h2>
-      <div className="button-row">
-        <button type="button" onClick={onPauseToggle}>
+    <section className={cx(panelClass, 'grid gap-[14px]')}>
+      <h2 className={panelHeadingClass}>Simulation</h2>
+      <div className="grid gap-2.5 min-[721px]:grid-cols-3">
+        <button type="button" className={buttonClass} onClick={onPauseToggle}>
           {paused ? 'Resume' : 'Pause'}
         </button>
-        <button type="button" onClick={onSingleStep}>
+        <button type="button" className={buttonClass} onClick={onSingleStep}>
           Step
         </button>
-        <button type="button" onClick={onReset}>
+        <button type="button" className={buttonClass} onClick={onReset}>
           Reset
         </button>
       </div>
-      <div className="control-stack">
-        <div className="control-meta">
-          <span className="label">Zoom</span>
-          <strong>{Math.round(zoom * 100)}%</strong>
+      <div className="grid gap-2.5">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className={labelClass}>Zoom</span>
+          <strong className="font-mono text-base text-[#281a11]">{Math.round(zoom * 100)}%</strong>
         </div>
-        <div className="button-row zoom-row">
-          <button type="button" onClick={onZoomOut} disabled={!canZoomOut}>
+        <div className="grid gap-2.5 min-[721px]:grid-cols-[56px_minmax(0,1fr)_56px]">
+          <button type="button" className={buttonClass} onClick={onZoomOut} disabled={!canZoomOut}>
             -
           </button>
-          <button type="button" onClick={onZoomReset}>
+          <button type="button" className={buttonClass} onClick={onZoomReset}>
             Reset Zoom
           </button>
-          <button type="button" onClick={onZoomIn} disabled={!canZoomIn}>
+          <button type="button" className={buttonClass} onClick={onZoomIn} disabled={!canZoomIn}>
             +
           </button>
         </div>

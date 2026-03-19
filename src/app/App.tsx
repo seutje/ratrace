@@ -17,6 +17,7 @@ import { Hud } from '../ui/Hud';
 import { Inspector } from '../ui/Inspector';
 import { OverlayMenu } from '../ui/OverlayMenu';
 import { getOverlayModeLabel } from '../ui/overlayOptions';
+import { cx, displayHeadingClass, drawerPillClass } from '../ui/styles';
 import {
   findAgentAtCanvasPoint,
   getRenderInterpolationState,
@@ -53,6 +54,14 @@ const zoomIn = (zoom: number) => Math.min(MAX_ZOOM, zoom * 2);
 const zoomOut = (zoom: number) => Math.max(MIN_ZOOM, zoom / 2);
 const clampZoom = (zoom: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
 const DRAG_THRESHOLD_PX = 4;
+const appBackgroundStyle = {
+  background:
+    'radial-gradient(circle at top left, rgba(232, 180, 94, 0.4), transparent 24%), radial-gradient(circle at bottom right, rgba(63, 109, 161, 0.24), transparent 24%), linear-gradient(180deg, #f8eedb 0%, #e4cda2 100%)',
+};
+const appGlowStyle = {
+  background:
+    'radial-gradient(circle at 12% 18%, rgba(255, 255, 255, 0.42), transparent 22%), radial-gradient(circle at 86% 14%, rgba(255, 216, 154, 0.28), transparent 18%), linear-gradient(180deg, rgba(255, 244, 220, 0.12), rgba(59, 35, 12, 0.08))',
+};
 
 export const App = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -316,12 +325,13 @@ export const App = () => {
   };
 
   return (
-    <main className="app-shell">
-      <div className="background-glow" />
-      <div className={`canvas-stage ${isPanning ? 'is-panning' : ''}`} ref={stageRef}>
+    <main className="relative h-full w-full overflow-hidden" style={appBackgroundStyle}>
+      <div className="pointer-events-none absolute inset-0 z-0" style={appGlowStyle} />
+      <div className="absolute inset-0 z-[1]" ref={stageRef}>
         <canvas
           aria-label="RatRace world canvas"
           ref={canvasRef}
+          className={cx('block h-full w-full', isPanning ? 'cursor-grabbing' : 'cursor-grab')}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerRelease}
@@ -329,22 +339,30 @@ export const App = () => {
           onWheel={handleWheel}
         />
       </div>
-      <div className="overlay-layer">
+      <div className="pointer-events-none absolute inset-0 z-[2]">
         <Drawer
           title="Overview"
-          className="drawer-overview"
-          summary={<span className="drawer-pill">{paused ? 'Paused' : 'Live'}</span>}
+          className="left-1/2 top-[18px] w-[min(1120px,calc(100vw-36px))] -translate-x-1/2 max-[960px]:w-[min(920px,calc(100vw-36px))] max-[720px]:top-3 max-[720px]:w-[calc(100vw-24px)]"
+          summary={<span className={drawerPillClass}>{paused ? 'Paused' : 'Live'}</span>}
         >
-          <div className="drawer-overview-content">
-            <div className="drawer-intro">
-              <h1>RatRace</h1>
-              <p>Drag with the left mouse button to pan. Scroll to zoom the city like a map.</p>
+          <div className="grid items-start gap-[18px] min-[961px]:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+            <div className="grid gap-2 px-1 pt-1">
+              <h1 className={cx(displayHeadingClass, 'm-0 text-[clamp(1.2rem,2.5vw,2.05rem)] leading-[0.88]')}>
+                RatRace
+              </h1>
+              <p className="m-0 max-w-[42ch] text-[#604f40]">
+                Drag with the left mouse button to pan. Scroll to zoom the city like a map.
+              </p>
             </div>
             <Hud variant="inline" />
           </div>
         </Drawer>
-        <Drawer title="Tools" className="drawer-tools" defaultOpen={false}>
-          <div className="drawer-stack">
+        <Drawer
+          title="Tools"
+          className="bottom-[18px] left-[18px] w-[min(360px,calc(100vw-32px))] max-[960px]:right-[18px] max-[960px]:left-auto max-[960px]:w-[min(420px,calc(100vw-36px))] max-[720px]:bottom-3 max-[720px]:w-[calc(100vw-24px)]"
+          defaultOpen={false}
+        >
+          <div className="grid gap-[14px]">
             <Controls
               paused={paused}
               zoom={zoom}
@@ -362,13 +380,16 @@ export const App = () => {
         </Drawer>
         <Drawer
           title="Overlays"
-          className="drawer-overlays"
+          className="left-[18px] top-[18px] w-[min(300px,calc(100vw-36px))] max-[960px]:w-[min(320px,calc(100vw-36px))] max-[720px]:top-[136px] max-[720px]:w-[calc(100vw-24px)]"
           defaultOpen={false}
-          summary={<span className="drawer-pill">{getOverlayModeLabel(overlayMode)}</span>}
+          summary={<span className={drawerPillClass}>{getOverlayModeLabel(overlayMode)}</span>}
         >
           <OverlayMenu mode={overlayMode} onChange={setOverlayMode} />
         </Drawer>
-        <Drawer title="Inspector" className="drawer-inspector">
+        <Drawer
+          title="Inspector"
+          className="right-[18px] top-[18px] w-[min(360px,calc(100vw-32px))] max-[960px]:bottom-[18px] max-[960px]:left-[18px] max-[960px]:right-auto max-[960px]:top-auto max-[960px]:w-[min(320px,calc(100vw-36px))] max-[720px]:top-[344px] max-[720px]:bottom-auto max-[720px]:w-[calc(100vw-24px)]"
+        >
           <Inspector />
         </Drawer>
       </div>

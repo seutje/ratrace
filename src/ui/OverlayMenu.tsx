@@ -1,5 +1,6 @@
 import { OverlayMode } from '../sim/types';
 import { overlayOptions } from './overlayOptions';
+import { buttonClass, cx, panelClass, panelHeadingClass, selectedButtonClass } from './styles';
 
 type OverlayMenuProps = {
   mode: OverlayMode;
@@ -8,14 +9,15 @@ type OverlayMenuProps = {
 
 export const OverlayMenu = ({ mode, onChange }: OverlayMenuProps) => {
   return (
-    <section className="panel">
-      <h2>Overlay Modes</h2>
-      <div className="overlay-grid">
+    <section className={panelClass}>
+      <h2 className={panelHeadingClass}>Overlay Modes</h2>
+      <div className="grid gap-2.5 min-[721px]:grid-cols-2">
         {overlayOptions.map((option) => (
           <button
             key={option.mode}
             type="button"
-            className={option.mode === mode ? 'selected' : undefined}
+            className={cx(buttonClass, option.mode === mode && selectedButtonClass)}
+            aria-pressed={option.mode === mode}
             onClick={() => onChange(option.mode)}
           >
             {option.label}
