@@ -172,11 +172,27 @@ describe('world generation', () => {
     );
 
     expect(commercialWorkers.length).toBe(Math.round(STARTER_POPULATION * COMMERCIAL_WORKER_SHARE));
-    expect(new Set(industrialWorkers.map((agent) => agent.shiftStartMinute))).toEqual(
-      new Set(INDUSTRIAL_SHIFT_PROFILES.map((profile) => profile.startMinute)),
+    expect(
+      industrialWorkers.every((agent) =>
+        INDUSTRIAL_SHIFT_PROFILES.some(
+          (profile) =>
+            agent.shiftStartMinute >= profile.startMinute && agent.shiftStartMinute < profile.startMinute + 60,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      commercialWorkers.every((agent) =>
+        COMMERCIAL_SHIFT_PROFILES.some(
+          (profile) =>
+            agent.shiftStartMinute >= profile.startMinute && agent.shiftStartMinute < profile.startMinute + 60,
+        ),
+      ),
+    ).toBe(true);
+    expect(new Set(industrialWorkers.map((agent) => agent.shiftStartMinute)).size).toBeGreaterThan(
+      INDUSTRIAL_SHIFT_PROFILES.length,
     );
-    expect(new Set(commercialWorkers.map((agent) => agent.shiftStartMinute))).toEqual(
-      new Set(COMMERCIAL_SHIFT_PROFILES.map((profile) => profile.startMinute)),
+    expect(new Set(commercialWorkers.map((agent) => agent.shiftStartMinute)).size).toBeGreaterThan(
+      COMMERCIAL_SHIFT_PROFILES.length,
     );
     expect(
       commercialWorkers.filter((agent) => agent.shiftStartMinute >= COMMERCIAL_SHIFT_PROFILES[1]!.startMinute).length,

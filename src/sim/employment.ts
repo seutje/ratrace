@@ -5,6 +5,8 @@ type ShiftProfile = {
   startMinute: number;
 };
 
+const SHIFT_START_STAGGER_WINDOW_MINUTES = 60;
+
 export type JobAssignment = {
   shiftStartMinute: number;
   workId: string;
@@ -55,7 +57,8 @@ const buildShiftSlots = (count: number, profiles: ShiftProfile[]) => {
   perProfile.forEach((profileCount, index) => {
     const startMinute = profiles[index]!.startMinute;
     for (let slotIndex = 0; slotIndex < profileCount; slotIndex += 1) {
-      slots.push(startMinute);
+      const offset = Math.floor((slotIndex * SHIFT_START_STAGGER_WINDOW_MINUTES) / Math.max(1, profileCount));
+      slots.push(startMinute + offset);
     }
   });
 
@@ -66,6 +69,10 @@ const getShiftProfiles = (kind: BuildingKind) =>
   kind === BuildingKind.Commercial ? COMMERCIAL_SHIFT_PROFILES : INDUSTRIAL_SHIFT_PROFILES;
 
 const isWorkplace = (building: Building) => building.kind !== BuildingKind.Residential;
+
+const isAssignedToProfile = (assignment: JobAssignment, profile: ShiftProfile) =>
+  assignment.shiftStartMinute >= profile.startMinute &&
+  assignment.shiftStartMinute < profile.startMinute + SHIFT_START_STAGGER_WINDOW_MINUTES;
 
 const createAssignmentsForKind = (count: number, buildings: Building[], kind: BuildingKind) => {
   if (count <= 0 || buildings.length === 0) {
@@ -108,24 +115,21 @@ const pickBuildingWithLowestLoad = (buildings: Building[], assignments: Pick<Job
 
 const pickShiftStartMinute = (kind: BuildingKind, assignments: JobAssignment[]) => {
   const profiles = getShiftProfiles(kind);
-  const counts = new Map<number, number>();
-  for (const assignment of assignments) {
-    counts.set(assignment.shiftStartMinute, (counts.get(assignment.shiftStartMinute) ?? 0) + 1);
-  }
-
   const totalAfterAssignment = assignments.length + 1;
-  let chosen = profiles[0]!.startMinute;
+  let chosen = profiles[0]!;
   let bestDeficit = Number.NEGATIVE_INFINITY;
 
   for (const profile of profiles) {
-    const deficit = totalAfterAssignment * profile.share - (counts.get(profile.startMinute) ?? 0);
+    const assignedCount = assignments.filter((assignment) => isAssignedToProfile(assignment, profile)).length;
+    const deficit = totalAfterAssignment * profile.share - assignedCount;
     if (deficit > bestDeficit) {
-      chosen = profile.startMinute;
+      chosen = profile;
       bestDeficit = deficit;
     }
   }
 
-  return chosen;
+  const assignedToChosenProfile = assignments.filter((assignment) => isAssignedToProfile(assignment, chosen)).length;
+  return chosen.startMinute + (assignedToChosenProfile % SHIFT_START_STAGGER_WINDOW_MINUTES);
 };
 
 export const getWorkBuildings = (buildings: Building[]) => buildings.filter(isWorkplace);

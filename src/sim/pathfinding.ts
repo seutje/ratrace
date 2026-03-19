@@ -4,7 +4,10 @@ const ROAD_COST = 0.5;
 const DEFAULT_COST = 1;
 const BLOCKED_PARENT = -1;
 const UNVISITED_PARENT = -2;
-const GOAL_SEARCH_PROMOTION_THRESHOLD = 4;
+// Reverse goal searches scan the whole map, so promoting too early turns
+// short commute bursts into long worker stalls. Wait until a destination is
+// requested often enough that the up-front cost is likely to pay back.
+const GOAL_SEARCH_PROMOTION_THRESHOLD = 12;
 const goalSearchCache = new WeakMap<WorldState['tiles'], Map<string, GoalCacheEntry>>();
 const pathCache = new WeakMap<WorldState['tiles'], Map<string, Point[] | null>>();
 
