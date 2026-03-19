@@ -33,6 +33,7 @@ import {
   gameMinutesPerTick,
   msPerTick,
 } from './constants';
+import { createAgentMemory, createInheritedAgentTraits } from './agents';
 import { pickEmploymentAssignment } from './employment';
 import { findPath } from './pathfinding';
 import { getCongestionSpeedFactor } from './traffic';
@@ -101,6 +102,8 @@ const cloneWorldForStep = (world: WorldState): WorldState => ({
   entities: {
     agents: world.entities.agents.map((agent) => ({
       ...agent,
+      traits: { ...agent.traits },
+      memory: { ...agent.memory },
       pos: { ...agent.pos },
       stats: { ...agent.stats },
       route: agent.route.slice(),
@@ -200,10 +203,83 @@ const getRoadYieldPoint = (currentTile: Point, direction: ReturnType<typeof getL
       return { x: laneCenter.x, y: currentTile.y + 1 - ROAD_RIGHT_OF_WAY_EPSILON };
   }
 };
+
+const getResiliencePenaltyMultiplier = (agent: Agent) => clamp(1.45 - agent.traits.resilience * 0.45, 0.75, 1.1);
+
+const getHardshipPressure = (agent: Agent) => Math.min(10, agent.memory.recentHardshipDays * 2);
+
+const getAgentShoppingHungerThreshold = (agent: Agent) =>
+  clamp(
+    SHOPPING_HUNGER_THRESHOLD -
+      (agent.traits.appetite - 1) * 18 +
+      (agent.traits.thrift - 1) * 12 -
+      getHardshipPressure(agent) -
+      Math.min(6, agent.memory.averageCommuteMinutes / 20),
+    35,
+    90,
+  );
+
+const getAgentMealThreshold = (agent: Agent) => clamp(getAgentShoppingHungerThreshold(agent) - 12, 24, MAX_STAT);
+
+const getAgentSleepThreshold = (agent: Agent) =>
+  clamp(
+    SLEEP_ENERGY_THRESHOLD + Math.min(10, agent.memory.averageCommuteMinutes / 12) - (agent.traits.stamina - 1) * 12,
+    12,
+    36,
+  );
+
+const getAgentShoppingBasketUnits = (agent: Agent) =>
+  clamp(
+    Math.round(
+      SHOPPING_BASKET_UNITS * (1.05 - (agent.traits.thrift - 1) * 0.7 + Math.min(0.35, agent.memory.recentHardshipDays * 0.05)),
+    ),
+    2,
+    SHOPPING_BASKET_UNITS + 4,
+  );
+
+const clearTravelTracking = (agent: Agent) => {
+  agent.travelPurpose = undefined;
+  agent.travelStartTick = undefined;
+};
+
+const beginTrackedTravel = (agent: Agent, destination: AgentDestination, world: WorldState) => {
+  if (destination.kind === 'shop') {
+    clearTravelTracking(agent);
+    return;
+  }
+
+  if (agent.travelPurpose === destination.kind && agent.travelStartTick !== undefined) {
+    return;
+  }
+
+  agent.travelPurpose = destination.kind;
+  agent.travelStartTick = world.tick;
+};
+
+const recordTrackedArrival = (agent: Agent, destination: AgentDestination | undefined, world: WorldState) => {
+  if (!destination || destination.kind === 'shop') {
+    clearTravelTracking(agent);
+    return;
+  }
+
+  if (agent.travelPurpose !== destination.kind || agent.travelStartTick === undefined) {
+    return;
+  }
+
+  const commuteMinutes = Math.max(gameMinutesPerTick, (world.tick - agent.travelStartTick) * gameMinutesPerTick);
+  agent.memory.lastCommuteMinutes = commuteMinutes;
+  agent.memory.longestCommuteMinutes = Math.max(agent.memory.longestCommuteMinutes, commuteMinutes);
+  agent.memory.averageCommuteMinutes =
+    agent.memory.averageCommuteMinutes <= 0 ? commuteMinutes : agent.memory.averageCommuteMinutes * 0.75 + commuteMinutes * 0.25;
+  clearTravelTracking(agent);
+};
+
 const getRequiredSleepTicks = (agent: Agent) => {
   const minimumSleepTicks = Math.ceil(SLEEP_MINIMUM_MINUTES / gameMinutesPerTick);
-  const missingEnergy = Math.max(0, SLEEP_TARGET_ENERGY - agent.stats.energy);
-  const energyRecoveryTicks = Math.ceil(missingEnergy / SLEEP_ENERGY_RECOVERY_PER_TICK);
+  const commuteRecoveryNeed = Math.min(8, agent.memory.averageCommuteMinutes * 0.06);
+  const missingEnergy = Math.max(0, SLEEP_TARGET_ENERGY + commuteRecoveryNeed - agent.stats.energy);
+  const sleepRecoveryPerTick = SLEEP_ENERGY_RECOVERY_PER_TICK * (0.75 + agent.traits.stamina * 0.35);
+  const energyRecoveryTicks = Math.ceil(missingEnergy / sleepRecoveryPerTick);
   return Math.max(minimumSleepTicks, energyRecoveryTicks);
 };
 
@@ -548,6 +624,7 @@ const recordShiftWork = (agent: Agent, building: Building, world: WorldState) =>
         building.stock += INDUSTRIAL_OUTPUT_PER_HOUR;
       }
     } else {
+      agent.memory.unpaidHours += 1;
       agent.thought = 'Worked, but payroll was short.';
     }
     agent.paidShiftWorkMinutes += 60;
@@ -555,12 +632,13 @@ const recordShiftWork = (agent: Agent, building: Building, world: WorldState) =>
 
   if (agent.shiftWorkMinutes >= WORK_SHIFT_MINUTES) {
     agent.lastCompletedShiftDay = world.day;
+    agent.memory.completedShifts += 1;
     agent.thought = 'Shift done.';
   }
 };
 
 const consumePantryMeal = (agent: Agent, home: Building) => {
-  if (home.pantryStock <= 0 || agent.stats.hunger < SHOPPING_HUNGER_THRESHOLD) {
+  if (home.pantryStock <= 0 || agent.stats.hunger < getAgentMealThreshold(agent)) {
     return false;
   }
 
@@ -620,7 +698,7 @@ const arriveAtBuilding = (
       const committedToSleep = isCommittedToSleep(agent, world);
       const shouldContinueSleeping =
         agent.state === AgentState.Sleeping && (committedToSleep || isSleepHours(world.minutesOfDay));
-      const shouldStartSleepBlock = agent.stats.energy <= SLEEP_ENERGY_THRESHOLD || isSleepHours(world.minutesOfDay);
+      const shouldStartSleepBlock = agent.stats.energy <= getAgentSleepThreshold(agent) || isSleepHours(world.minutesOfDay);
 
       if (shouldContinueSleeping || shouldStartSleepBlock) {
         if (!committedToSleep && agent.state !== AgentState.Sleeping) {
@@ -650,7 +728,7 @@ const arriveAtBuilding = (
         agent.lastShoppedTick !== world.tick
       ) {
         const transferredUnits = Math.min(
-          SHOPPING_BASKET_UNITS,
+          getAgentShoppingBasketUnits(agent),
           pantryGap,
           building.stock,
           Math.floor(agent.wallet / SHOP_PRICE_PER_UNIT),
@@ -670,6 +748,7 @@ const arriveAtBuilding = (
         world.economy.treasury += salesTax;
         agent.stats.happiness = clamp(agent.stats.happiness + 8, 0, MAX_STAT);
         agent.lastShoppedTick = world.tick;
+        agent.memory.shoppingTrips += 1;
         agent.thought = 'Pantry restocked.';
         if (building.stock <= 0) {
           invalidateShopSearchState(shopSearchState);
@@ -684,21 +763,33 @@ const updateAgentStats = (agent: Agent) => {
   const sleeping = agent.state === AgentState.Sleeping;
   const working = agent.state === AgentState.Working;
   const shopping = agent.state === AgentState.Shopping;
+  const staminaDrainMultiplier = clamp(1.5 - agent.traits.stamina * 0.5, 0.75, 1.15);
+  const resiliencePenaltyMultiplier = getResiliencePenaltyMultiplier(agent);
+  const commuteStress = Math.min(14, agent.memory.averageCommuteMinutes * 0.18);
+  const hardshipStress = Math.min(18, agent.memory.recentHardshipDays * 3);
+  const payrollStress = Math.min(10, agent.memory.unpaidHours * 0.45);
 
-  agent.stats.hunger = clamp(agent.stats.hunger + (sleeping ? 0.03 : 0.09), 0, MAX_STAT);
+  agent.stats.hunger = clamp(agent.stats.hunger + (sleeping ? 0.03 : 0.09) * (0.82 + agent.traits.appetite * 0.36), 0, MAX_STAT);
   agent.stats.energy = clamp(
-    agent.stats.energy + (sleeping ? SLEEP_ENERGY_RECOVERY_PER_TICK : working ? -0.08 : -0.04),
+    agent.stats.energy +
+      (sleeping
+        ? SLEEP_ENERGY_RECOVERY_PER_TICK * (0.75 + agent.traits.stamina * 0.35)
+        : (working ? -0.08 : -0.04) * staminaDrainMultiplier),
     0,
     MAX_STAT,
   );
   agent.stats.happiness = clamp(
-    100 - agent.stats.hunger * 0.45 - (MAX_STAT - agent.stats.energy) * 0.35 + (shopping ? 5 : 0),
+    100 -
+      agent.stats.hunger * 0.45 * resiliencePenaltyMultiplier -
+      (MAX_STAT - agent.stats.energy) * 0.35 * resiliencePenaltyMultiplier -
+      (commuteStress + hardshipStress + payrollStress) * resiliencePenaltyMultiplier +
+      (shopping ? 5 : 0),
     0,
     MAX_STAT,
   );
   agent.keptMaxHungerToday = agent.keptMaxHungerToday && agent.stats.hunger >= MAX_STAT;
 
-  if (agent.wallet <= 0 && agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD) {
+  if (agent.wallet <= 0 && agent.stats.hunger >= getAgentShoppingHungerThreshold(agent)) {
     agent.thought = 'Hungry, but broke.';
   }
 };
@@ -840,7 +931,7 @@ const determineDestination = (
     return { buildingId: home.id, kind: 'home' };
   }
 
-  if (agent.stats.energy <= SLEEP_ENERGY_THRESHOLD && home) {
+  if (agent.stats.energy <= getAgentSleepThreshold(agent) && home) {
     return { buildingId: home.id, kind: 'home' };
   }
 
@@ -849,7 +940,7 @@ const determineDestination = (
   }
 
   const emergencyFoodRun =
-    agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && agent.carriedMeals <= 0 && (home?.pantryStock ?? 0) <= 0;
+    agent.stats.hunger >= getAgentShoppingHungerThreshold(agent) && agent.carriedMeals <= 0 && (home?.pantryStock ?? 0) <= 0;
   const pantryRunFromHome =
     !!home &&
     homeNeedsPantryRefill(home) &&
@@ -890,7 +981,7 @@ const applyDestinationState = (agent: Agent, destination?: AgentDestination) => 
     case 'home':
       agent.state = AgentState.MovingHome;
       agent.thought =
-        agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD && agent.wallet < getMinimumShoppingCash()
+        agent.stats.hunger >= getAgentShoppingHungerThreshold(agent) && agent.wallet < getMinimumShoppingCash()
           ? 'Hungry, but broke.'
           : 'Going home.';
       break;
@@ -925,6 +1016,7 @@ const routeAgent = (
       consumePantryMeal(agent, home);
     }
     agent.destination = undefined;
+    clearTravelTracking(agent);
     clearAgentRoute(agent);
     agent.state = AgentState.Idle;
     const staffedAfter = getStaffedCommercialBuildingId(world, buildingIndex, agent, currentTile);
@@ -936,7 +1028,7 @@ const routeAgent = (
   }
 
   if (
-    agent.stats.hunger >= SHOPPING_HUNGER_THRESHOLD &&
+    agent.stats.hunger >= getAgentShoppingHungerThreshold(agent) &&
     (home?.pantryStock ?? 0) <= 0 &&
     agent.wallet < getMinimumShoppingCash()
   ) {
@@ -945,22 +1037,26 @@ const routeAgent = (
 
   const building = getBuilding(buildingIndex, destination.buildingId);
   if (!building) {
+    clearTravelTracking(agent);
     return;
   }
 
   if (currentTile.x === building.tile.x && currentTile.y === building.tile.y) {
     agent.destination = destination;
+    recordTrackedArrival(agent, destination, world);
     clearAgentRoute(agent);
     arriveAtBuilding(agent, building, buildingIndex, staffedCommercialCounts, shopSearchState, world);
     return;
   }
 
+  beginTrackedTravel(agent, destination, world);
   applyDestinationState(agent, destination);
   assignRoute(world, buildingIndex, agent, destination, building.tile);
   moveAgent(world, agent, reservations);
 
   const arrivedTile = getAgentCurrentTile(agent);
   if (arrivedTile.x === building.tile.x && arrivedTile.y === building.tile.y) {
+    recordTrackedArrival(agent, destination, world);
     arriveAtBuilding(agent, building, buildingIndex, staffedCommercialCounts, shopSearchState, world);
   }
 
@@ -1128,15 +1224,33 @@ const pickHomeWithCapacity = (
 };
 
 const qualifiesForHouseholdGrowth = (agent: Agent) =>
-  agent.wallet >= HOUSEHOLD_GROWTH_WALLET_THRESHOLD && agent.stats.happiness >= HOUSEHOLD_GROWTH_HAPPINESS_THRESHOLD;
+  agent.wallet >= HOUSEHOLD_GROWTH_WALLET_THRESHOLD &&
+  agent.stats.happiness >= HOUSEHOLD_GROWTH_HAPPINESS_THRESHOLD &&
+  agent.memory.recentHardshipDays === 0 &&
+  agent.memory.unpaidHours < 4;
 
-const createHouseholdGrowthAgent = (world: WorldState, home: Building, assignment: NonNullable<ReturnType<typeof pickEmploymentAssignment>>) => ({
+const createHouseholdGrowthAgent = (
+  world: WorldState,
+  home: Building,
+  assignment: NonNullable<ReturnType<typeof pickEmploymentAssignment>>,
+  firstParent: Agent,
+  secondParent: Agent,
+) => ({
   id: nextAgentId(world),
   name: createRuntimeAgentName(world, home.tile, assignment.shiftStartMinute),
   pos: { x: home.tile.x + 0.5, y: home.tile.y + 0.5 },
   wallet: 18,
   carriedMeals: 0,
   stats: { hunger: 24, energy: 72, happiness: 64 },
+  traits: createInheritedAgentTraits(world.seed, firstParent, secondParent, [
+    world.day,
+    world.tick,
+    world.entities.agents.length + 1,
+    home.tile.x,
+    home.tile.y,
+    assignment.shiftStartMinute,
+  ]),
+  memory: createAgentMemory(),
   homeId: home.id,
   workId: assignment.workId,
   state: AgentState.Idle,
@@ -1150,6 +1264,8 @@ const createHouseholdGrowthAgent = (world: WorldState, home: Building, assignmen
   commuteToHomeRoute: null,
   commuteToHomeRouteMapVersion: 0,
   destination: undefined,
+  travelPurpose: undefined,
+  travelStartTick: undefined,
   lastShoppedTick: undefined,
   sleepUntilTick: undefined,
   shiftStartMinute: assignment.shiftStartMinute,
@@ -1171,6 +1287,9 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
     agent.daysInCity += 1;
     agent.maxHungerStreakDays =
       agent.keptMaxHungerToday && agent.stats.hunger >= MAX_STAT ? agent.maxHungerStreakDays + 1 : 0;
+    agent.memory.recentHardshipDays = agent.keptMaxHungerToday && agent.stats.hunger >= MAX_STAT
+      ? agent.memory.recentHardshipDays + 1
+      : Math.max(0, agent.memory.recentHardshipDays - 1);
     agent.keptMaxHungerToday = agent.stats.hunger >= MAX_STAT;
   }
 
@@ -1263,7 +1382,7 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
       firstParent.wallet -= HOUSEHOLD_GROWTH_COST;
       secondParent.wallet -= HOUSEHOLD_GROWTH_COST;
       world.economy.treasury += HOUSEHOLD_GROWTH_COST * 2;
-      world.entities.agents.push(createHouseholdGrowthAgent(world, targetHome, assignment));
+      world.entities.agents.push(createHouseholdGrowthAgent(world, targetHome, assignment, firstParent, secondParent));
       occupied.set(targetHome.id, (occupied.get(targetHome.id) ?? 0) + 1);
       const targetResidents = households.get(targetHome.id);
       if (targetResidents) {

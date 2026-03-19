@@ -9,6 +9,7 @@ import {
   SimulationWorkerInboundMessage,
   SimulationWorkerOutboundMessage,
   WorldDynamicSnapshot,
+  toDynamicAgentSnapshot,
 } from '../sim/simulationWorkerTypes';
 import { paintWorldTile, selectWorldAgent } from '../sim/worldMutations';
 import { createStarterWorld } from '../sim/world';
@@ -88,32 +89,7 @@ const toDynamicSnapshot = (world: WorldState): WorldDynamicSnapshot => ({
   selectedAgent: world.selectedAgentId
     ? (() => {
         const agent = world.entities.agents.find((entry) => entry.id === world.selectedAgentId);
-        return agent
-          ? {
-              carriedMeals: agent.carriedMeals,
-              daysInCity: agent.daysInCity,
-              destination: agent.destination ? { ...agent.destination } : undefined,
-              homeId: agent.homeId,
-              id: agent.id,
-              keptMaxHungerToday: agent.keptMaxHungerToday,
-              lastCompletedShiftDay: agent.lastCompletedShiftDay,
-              lastShoppedTick: agent.lastShoppedTick,
-              maxHungerStreakDays: agent.maxHungerStreakDays,
-              name: agent.name,
-              paidShiftWorkMinutes: agent.paidShiftWorkMinutes,
-              pos: { ...agent.pos },
-              routeComputeCount: agent.routeComputeCount,
-              shiftDay: agent.shiftDay,
-              shiftStartMinute: agent.shiftStartMinute,
-              shiftWorkMinutes: agent.shiftWorkMinutes,
-              sleepUntilTick: agent.sleepUntilTick,
-              state: agent.state,
-              stats: { ...agent.stats },
-              thought: agent.thought,
-              wallet: agent.wallet,
-              workId: agent.workId,
-            }
-          : undefined;
+        return agent ? toDynamicAgentSnapshot(agent) : undefined;
       })()
     : undefined,
   selectedAgentId: world.selectedAgentId,

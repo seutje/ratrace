@@ -93,6 +93,14 @@ export const Inspector = ({ followActive, onFollowToggle }: InspectorProps) => {
               <dd>{agent.stats.happiness.toFixed(1)}</dd>
             </div>
             <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Traits</dt>
+              <dd className="text-right">
+                A {agent.traits.appetite.toFixed(2)} / S {agent.traits.stamina.toFixed(2)}
+                <br />
+                T {agent.traits.thrift.toFixed(2)} / R {agent.traits.resilience.toFixed(2)}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
               <dt className={labelClass}>Home</dt>
               <dd>{homeLabel}</dd>
             </div>
@@ -103,6 +111,20 @@ export const Inspector = ({ followActive, onFollowToggle }: InspectorProps) => {
             <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
               <dt className={labelClass}>Pantry</dt>
               <dd>{home ? `${home.pantryStock}/${home.pantryCapacity}` : 'None'}</dd>
+            </div>
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Memory</dt>
+              <dd className="text-right">
+                Avg {agent.memory.averageCommuteMinutes.toFixed(0)}m / Max {agent.memory.longestCommuteMinutes.toFixed(0)}m
+                <br />
+                Shops {agent.memory.shoppingTrips} / Shifts {agent.memory.completedShifts}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">
+              <dt className={labelClass}>Hardship</dt>
+              <dd>
+                {agent.memory.recentHardshipDays}d, unpaid {agent.memory.unpaidHours}h
+              </dd>
             </div>
             <div className="flex justify-between gap-2.5">
               <dt className={labelClass}>Path Count</dt>

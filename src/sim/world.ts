@@ -14,6 +14,7 @@ import {
   STARTER_RESIDENTIAL_CAPACITY,
   STARTER_ROAD_SPACING,
 } from './constants';
+import { createAgentMemory, createAgentTraits } from './agents';
 import { createEmploymentAssignments } from './employment';
 import { createRng } from './random';
 import { createAgentName, createBuildingLabel } from './naming';
@@ -358,6 +359,8 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED, population = START
         energy: Math.floor(55 + rng() * 25),
         happiness: Math.floor(60 + rng() * 20),
       },
+      traits: createAgentTraits(rng),
+      memory: createAgentMemory(),
       homeId: home.id,
       workId: assignment.workId,
       state: AgentState.Idle,
@@ -371,6 +374,8 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED, population = START
       commuteToHomeRoute: null,
       commuteToHomeRouteMapVersion: 0,
       destination: undefined,
+      travelPurpose: undefined,
+      travelStartTick: undefined,
       lastShoppedTick: undefined,
       sleepUntilTick: undefined,
       shiftStartMinute: assignment.shiftStartMinute,

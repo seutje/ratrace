@@ -34,6 +34,21 @@ const commercialLabelPattern = /^(North|South|East|West|Central) (Market|Corner|
 const industrialLabelPattern = /^(North|South|East|West|Central) (Works|Yard|Foundry|Depot|Mill|Plant) \d{2}$/;
 const agentNamePattern = /^[A-Z][a-z]+ [A-Z][a-z]+$/;
 const TEST_STARTER_POPULATION = 1000;
+const neutralTraits = {
+  appetite: 1,
+  stamina: 1,
+  thrift: 1,
+  resilience: 1,
+};
+const freshMemory = {
+  averageCommuteMinutes: 0,
+  lastCommuteMinutes: 0,
+  longestCommuteMinutes: 0,
+  recentHardshipDays: 0,
+  shoppingTrips: 0,
+  completedShifts: 0,
+  unpaidHours: 0,
+};
 
 const stepTimes = (world: WorldState, ticks: number) => {
   let current = world;
@@ -59,6 +74,8 @@ const makeTestAgent = (overrides: Partial<WorldState['entities']['agents'][numbe
   wallet: 20,
   carriedMeals: 0,
   stats: { hunger: 20, energy: 80, happiness: 70 },
+  traits: { ...neutralTraits },
+  memory: { ...freshMemory },
   homeId: 'home',
   workId: 'work',
   state: AgentState.Idle,
@@ -72,6 +89,8 @@ const makeTestAgent = (overrides: Partial<WorldState['entities']['agents'][numbe
   commuteToHomeRoute: null,
   commuteToHomeRouteMapVersion: 0,
   destination: undefined,
+  travelPurpose: undefined,
+  travelStartTick: undefined,
   lastShoppedTick: undefined,
   sleepUntilTick: undefined,
   shiftStartMinute: 8 * 60,
@@ -163,6 +182,8 @@ describe('world generation', () => {
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Commercial)).toBe(true);
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Industrial)).toBe(true);
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Residential && building.pantryCapacity > 0)).toBe(true);
+    expect(world.entities.agents.every((agent) => agent.memory.averageCommuteMinutes === 0)).toBe(true);
+    expect(new Set(world.entities.agents.slice(0, 50).map((agent) => agent.traits.appetite)).size).toBeGreaterThan(1);
   });
 
   it('assigns commercial jobs and staggered shifts across the workforce', () => {
@@ -461,12 +482,14 @@ describe('agent behavior', () => {
     ];
 
     world.minutesOfDay = 8 * 60;
-    const leavingForWork = stepWorld(world);
+    const leavingForWork = stepTimes(world, 10);
     expect(leavingForWork.entities.agents[0]!.routeComputeCount).toBe(1);
     expect(leavingForWork.entities.agents[0]!.commuteToWorkRoute).toEqual([
       { x: 0, y: 0 },
       { x: 1, y: 0 },
     ]);
+    expect(leavingForWork.entities.agents[0]!.memory.lastCommuteMinutes).toBeGreaterThan(0);
+    expect(leavingForWork.entities.agents[0]!.memory.averageCommuteMinutes).toBeGreaterThan(0);
 
     leavingForWork.entities.agents[0]!.pos = tileCenter({ x: 1, y: 0 });
     leavingForWork.entities.agents[0]!.destination = { buildingId: 'work', kind: 'work' };
@@ -481,6 +504,7 @@ describe('agent behavior', () => {
 
     const headingHome = stepWorld(leavingForWork);
     expect(headingHome.entities.agents[0]!.routeComputeCount).toBe(2);
+    expect(headingHome.entities.agents[0]!.memory.longestCommuteMinutes).toBeGreaterThan(0);
 
     headingHome.entities.agents[0]!.pos = tileCenter({ x: 0, y: 0 });
     headingHome.entities.agents[0]!.destination = undefined;
@@ -500,6 +524,63 @@ describe('agent behavior', () => {
       { x: 0, y: 0 },
       { x: 1, y: 0 },
     ]);
+  });
+
+  it('uses traits and commute memory to change rest urgency and morale', () => {
+    const world = createBlankWorld(1, 1);
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });
+    world.entities.buildings.push(
+      {
+        id: 'home',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 3,
+        pantryStock: 6,
+        pantryCapacity: 6,
+        label: 'home',
+      },
+    );
+    world.entities.agents = [
+      makeTestAgent({
+        id: 'tired',
+        homeId: 'home',
+        workId: 'factory',
+        wallet: 40,
+        pos: tileCenter({ x: 0, y: 0 }),
+        stats: { hunger: 20, energy: 24, happiness: 70 },
+        traits: { appetite: 1, stamina: 0.8, thrift: 1, resilience: 0.8 },
+        memory: { ...freshMemory, averageCommuteMinutes: 60 },
+        shiftDay: world.day,
+        shiftWorkMinutes: WORK_SHIFT_MINUTES,
+        paidShiftWorkMinutes: WORK_SHIFT_MINUTES,
+        lastCompletedShiftDay: world.day,
+      }),
+      makeTestAgent({
+        id: 'rested',
+        homeId: 'home',
+        workId: 'factory',
+        wallet: 40,
+        pos: tileCenter({ x: 0, y: 0 }),
+        stats: { hunger: 20, energy: 24, happiness: 70 },
+        traits: { appetite: 1, stamina: 1.2, thrift: 1, resilience: 1.2 },
+        memory: { ...freshMemory },
+        shiftDay: world.day,
+        shiftWorkMinutes: WORK_SHIFT_MINUTES,
+        paidShiftWorkMinutes: WORK_SHIFT_MINUTES,
+        lastCompletedShiftDay: world.day,
+      }),
+    ];
+    world.minutesOfDay = 21 * 60;
+
+    const next = stepWorld(world);
+
+    expect(next.entities.agents.find((agent) => agent.id === 'tired')!.state).toBe(AgentState.Sleeping);
+    expect(next.entities.agents.find((agent) => agent.id === 'rested')!.state).toBe(AgentState.Idle);
+    expect(next.entities.agents.find((agent) => agent.id === 'tired')!.stats.happiness).toBeLessThan(
+      next.entities.agents.find((agent) => agent.id === 'rested')!.stats.happiness,
+    );
   });
 
   it('invalidates remembered commute paths on paint without recalculating them eagerly', () => {
@@ -618,6 +699,8 @@ describe('economy', () => {
     afterWork.shiftWorkMinutes = WORK_SHIFT_MINUTES;
     afterWork.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
     afterWork.lastCompletedShiftDay = world.day;
+    afterWork.traits = { ...neutralTraits };
+    afterWork.memory = { ...freshMemory };
     const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
     ensureStaffedShop(world, shop);
     const home = world.entities.buildings.find((building) => building.id === afterWork.homeId)!;
@@ -944,6 +1027,8 @@ describe('economy', () => {
 
     agent.wallet = 100;
     agent.stats.hunger = 100;
+    agent.traits = { ...neutralTraits };
+    agent.memory = { ...freshMemory };
     home.pantryStock = 0;
     agent.shiftDay = world.day;
     agent.shiftWorkMinutes = WORK_SHIFT_MINUTES;

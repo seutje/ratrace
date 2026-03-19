@@ -61,6 +61,23 @@ export type AgentStats = {
   happiness: number;
 };
 
+export type AgentTraits = {
+  appetite: number;
+  stamina: number;
+  thrift: number;
+  resilience: number;
+};
+
+export type AgentMemory = {
+  averageCommuteMinutes: number;
+  lastCommuteMinutes: number;
+  longestCommuteMinutes: number;
+  recentHardshipDays: number;
+  shoppingTrips: number;
+  completedShifts: number;
+  unpaidHours: number;
+};
+
 export type AgentDestination = {
   buildingId: string;
   kind: 'home' | 'work' | 'shop';
@@ -73,6 +90,8 @@ export type Agent = {
   wallet: number;
   carriedMeals: number;
   stats: AgentStats;
+  traits: AgentTraits;
+  memory: AgentMemory;
   homeId: string;
   workId: string;
   state: AgentState;
@@ -86,6 +105,8 @@ export type Agent = {
   commuteToHomeRoute: Point[] | null;
   commuteToHomeRouteMapVersion: number;
   destination?: AgentDestination;
+  travelPurpose?: AgentDestination['kind'];
+  travelStartTick?: number;
   lastShoppedTick?: number;
   sleepUntilTick?: number;
   shiftStartMinute: number;

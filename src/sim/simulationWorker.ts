@@ -5,10 +5,10 @@ import { stepWorldInPlace } from './stepWorld';
 import {
   agentStateOrder,
   CompactAgentFrame,
-  DynamicAgentSnapshot,
   SimulationWorkerInboundMessage,
   SimulationWorkerOutboundMessage,
   WorldDynamicSnapshot,
+  toDynamicAgentSnapshot,
 } from './simulationWorkerTypes';
 import { selectWorldAgent, paintWorldTile } from './worldMutations';
 import { createStarterWorld } from './world';
@@ -19,31 +19,6 @@ let tickTimer: number | null = null;
 let lastPublishedAgentCount = world.entities.agents.length;
 
 const agentStateCodeByValue = new Map(agentStateOrder.map((state, index) => [state, index]));
-
-const toDynamicAgentSnapshot = (agent: typeof world.entities.agents[number]): DynamicAgentSnapshot => ({
-  carriedMeals: agent.carriedMeals,
-  daysInCity: agent.daysInCity,
-  destination: agent.destination ? { ...agent.destination } : undefined,
-  homeId: agent.homeId,
-  id: agent.id,
-  keptMaxHungerToday: agent.keptMaxHungerToday,
-  lastCompletedShiftDay: agent.lastCompletedShiftDay,
-  lastShoppedTick: agent.lastShoppedTick,
-  maxHungerStreakDays: agent.maxHungerStreakDays,
-  name: agent.name,
-  paidShiftWorkMinutes: agent.paidShiftWorkMinutes,
-  pos: { ...agent.pos },
-  shiftDay: agent.shiftDay,
-  shiftStartMinute: agent.shiftStartMinute,
-  shiftWorkMinutes: agent.shiftWorkMinutes,
-  sleepUntilTick: agent.sleepUntilTick,
-  state: agent.state,
-  stats: { ...agent.stats },
-  thought: agent.thought,
-  wallet: agent.wallet,
-  workId: agent.workId,
-  routeComputeCount: agent.routeComputeCount,
-});
 
 const createCompactAgentFrame = (): CompactAgentFrame => {
   const agentCount = world.entities.agents.length;

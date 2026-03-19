@@ -18,7 +18,33 @@ export type DynamicAgentSnapshot = Omit<
   | 'commuteToWorkRouteMapVersion'
   | 'commuteToHomeRoute'
   | 'commuteToHomeRouteMapVersion'
+  | 'travelPurpose'
+  | 'travelStartTick'
 >;
+
+export const toDynamicAgentSnapshot = (agent: Agent): DynamicAgentSnapshot => {
+  const {
+    route,
+    routeIndex,
+    routeMapVersion,
+    commuteToWorkRoute,
+    commuteToWorkRouteMapVersion,
+    commuteToHomeRoute,
+    commuteToHomeRouteMapVersion,
+    travelPurpose,
+    travelStartTick,
+    ...snapshot
+  } = agent;
+
+  return {
+    ...snapshot,
+    destination: agent.destination ? { ...agent.destination } : undefined,
+    memory: { ...agent.memory },
+    pos: { ...agent.pos },
+    stats: { ...agent.stats },
+    traits: { ...agent.traits },
+  };
+};
 
 export type DynamicBuildingSnapshot = Building;
 
