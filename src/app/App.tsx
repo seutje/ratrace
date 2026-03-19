@@ -392,7 +392,7 @@ export const App = () => {
         <canvas
           aria-label="RatRace world canvas"
           ref={canvasRef}
-          className={cx('block h-full w-full', isPanning ? 'cursor-grabbing' : 'cursor-grab')}
+          className={cx('block h-full w-full')}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerRelease}
