@@ -127,26 +127,7 @@ const setRenderSnapshots = (nextSnapshot: WorldDynamicSnapshot) => {
   currentRenderSnapshotReceivedAtMs = nowMs();
 };
 
-const applyCompactFrameToWorld = (world: WorldState, frame: CompactAgentFrame) => {
-  const agentCount = world.entities.agents.length;
-  if (agentCount !== frame.posX.length) {
-    throw new Error('Dynamic agent frame length does not match world agent count.');
-  }
-
-  for (let index = 0; index < agentCount; index += 1) {
-    const agent = world.entities.agents[index]!;
-    agent.pos.x = frame.posX[index]!;
-    agent.pos.y = frame.posY[index]!;
-    agent.stats.hunger = frame.hungerValues[index]!;
-    agent.stats.energy = frame.energyValues[index]!;
-    agent.stats.happiness = frame.happinessValues[index]!;
-    agent.state = agentStateByCode[frame.stateCodes[index]!] ?? agent.state;
-  }
-};
-
 const applyDynamicSnapshotToWorld = (world: WorldState, snapshot: WorldDynamicSnapshot): WorldState => {
-  applyCompactFrameToWorld(world, snapshot.frame);
-
   return {
     ...world,
     day: snapshot.day,
@@ -370,15 +351,18 @@ export const findAgentAtCanvasPoint = (
   point: { x: number; y: number },
   tileSize: number,
   offset: { x: number; y: number },
+  frame?: CompactAgentFrame,
 ) => {
   const worldPoint = {
     x: (point.x - offset.x) / tileSize,
     y: (point.y - offset.y) / tileSize,
   };
 
-  return world.entities.agents.find((agent) => {
-    const dx = agent.pos.x - worldPoint.x;
-    const dy = agent.pos.y - worldPoint.y;
+  return world.entities.agents.find((agent, index) => {
+    const x = frame && index < frame.posX.length ? frame.posX[index]! : agent.pos.x;
+    const y = frame && index < frame.posY.length ? frame.posY[index]! : agent.pos.y;
+    const dx = x - worldPoint.x;
+    const dy = y - worldPoint.y;
     return dx * dx + dy * dy <= 0.45 * 0.45;
   });
 };

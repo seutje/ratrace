@@ -110,6 +110,9 @@ export const renderStaticWorld = (ctx: CanvasRenderingContext2D, world: WorldSta
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
+const getFrameValue = (values: Float32Array | Uint8Array | undefined, index: number, fallback: number) =>
+  values && index < values.length ? values[index]! : fallback;
+
 const getOverlayFill = (hue: number, saturation: number, lightness: number, alpha: number) =>
   `hsla(${hue} ${saturation}% ${lightness}% / ${clamp01(alpha)})`;
 
@@ -214,15 +217,20 @@ const renderAgentStatOverlay = (
   world: WorldState,
   viewport: Viewport,
   mode: Extract<OverlayMode, 'hunger' | 'energy'>,
+  currentFrame?: CompactAgentFrame,
 ) => {
-  for (const agent of world.entities.agents) {
-    const severity = mode === 'hunger' ? clamp01(agent.stats.hunger / 100) : clamp01((100 - agent.stats.energy) / 100);
+  for (const [index, agent] of world.entities.agents.entries()) {
+    const hunger = getFrameValue(currentFrame?.hungerValues, index, agent.stats.hunger);
+    const energy = getFrameValue(currentFrame?.energyValues, index, agent.stats.energy);
+    const posX = getFrameValue(currentFrame?.posX, index, agent.pos.x);
+    const posY = getFrameValue(currentFrame?.posY, index, agent.pos.y);
+    const severity = mode === 'hunger' ? clamp01(hunger / 100) : clamp01((100 - energy) / 100);
     if (severity <= 0.15) {
       continue;
     }
 
-    const x = viewport.offsetX + agent.pos.x * viewport.tileSize;
-    const y = viewport.offsetY + agent.pos.y * viewport.tileSize;
+    const x = viewport.offsetX + posX * viewport.tileSize;
+    const y = viewport.offsetY + posY * viewport.tileSize;
 
     ctx.beginPath();
     ctx.arc(x, y, viewport.tileSize * (0.22 + severity * 0.34), 0, Math.PI * 2);
@@ -234,14 +242,20 @@ const renderAgentStatOverlay = (
   }
 };
 
-const renderOverlay = (ctx: CanvasRenderingContext2D, world: WorldState, viewport: Viewport, overlayMode: OverlayMode) => {
+const renderOverlay = (
+  ctx: CanvasRenderingContext2D,
+  world: WorldState,
+  viewport: Viewport,
+  overlayMode: OverlayMode,
+  currentFrame?: CompactAgentFrame,
+) => {
   switch (overlayMode) {
     case 'traffic':
       renderTrafficOverlay(ctx, world, viewport);
       break;
     case 'hunger':
     case 'energy':
-      renderAgentStatOverlay(ctx, world, viewport, overlayMode);
+      renderAgentStatOverlay(ctx, world, viewport, overlayMode, currentFrame);
       break;
     case 'housing':
       renderHousingOverlay(ctx, world, viewport);
@@ -270,11 +284,11 @@ export const renderDynamicWorld = (
 ) => {
   ctx.lineWidth = 1;
 
-  renderOverlay(ctx, world, viewport, overlayMode);
+  const currentFrame = interpolation?.currentFrame;
+  const previousFrame = interpolation?.previousFrame;
+  renderOverlay(ctx, world, viewport, overlayMode, currentFrame);
 
   for (const [index, agent] of world.entities.agents.entries()) {
-    const currentFrame = interpolation?.currentFrame;
-    const previousFrame = interpolation?.previousFrame;
     const canInterpolate =
       Boolean(currentFrame && previousFrame && index < currentFrame.posX.length && index < previousFrame.posX.length);
     const interpolationAlpha = interpolation?.alpha ?? 1;

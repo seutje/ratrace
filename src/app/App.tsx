@@ -26,6 +26,7 @@ import {
   tileFromCanvasPoint,
   useWorldStore,
 } from './store';
+import { getAgentRenderPosition, getPanToCenterWorldPoint } from './camera';
 import { msPerTick } from '../sim/constants';
 
 type CanvasSize = {
@@ -72,13 +73,16 @@ export const App = () => {
   const panRef = useRef<PanOffset>({ x: 0, y: 0 });
   const zoomRef = useRef(DEFAULT_ZOOM);
   const dragStateRef = useRef<DragState | null>(null);
+  const followAgentRef = useRef(false);
   const [size, setSize] = useState<CanvasSize>({ width: 960, height: 640 });
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [pan, setPan] = useState<PanOffset>({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
+  const [followAgent, setFollowAgent] = useState(false);
 
   const worldWidth = useWorldStore((state) => state.world.width);
   const worldHeight = useWorldStore((state) => state.world.height);
+  const selectedAgentId = useWorldStore((state) => state.world.selectedAgentId);
   const paused = useWorldStore((state) => state.paused);
   const buildMode = useWorldStore((state) => state.buildMode);
   const overlayMode = useWorldStore((state) => state.overlayMode);
@@ -131,6 +135,31 @@ export const App = () => {
   }, [pan, viewport, zoom]);
 
   useEffect(() => {
+    followAgentRef.current = followAgent;
+  }, [followAgent]);
+
+  useEffect(() => {
+    if (!followAgent) {
+      return;
+    }
+
+    const world = useWorldStore.getState().world;
+    const { previous, current } = getRenderInterpolationState();
+    const target = getAgentRenderPosition(world, world.selectedAgentId, {
+      alpha: 1,
+      currentFrame: current?.frame,
+      previousFrame: previous?.frame,
+    });
+
+    if (!target) {
+      setFollowAgent(false);
+      return;
+    }
+
+    setPan(getPanToCenterWorldPoint(world, size, zoomRef.current, target));
+  }, [followAgent, selectedAgentId, size, zoom]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) {
       return;
@@ -146,7 +175,36 @@ export const App = () => {
     let frame = 0;
 
     const drawWorld = (world: WorldState, frameTime: number) => {
-      const staticLayerKey = getStaticWorldCacheKey(world, viewport);
+      const { previous, current, currentReceivedAtMs } = getRenderInterpolationState();
+      const interpolationWindowMs =
+        previous && current ? Math.max(msPerTick, (current.tick - previous.tick) * msPerTick) : msPerTick;
+      const interpolationAlpha =
+        previous && current ? Math.max(0, Math.min(1, (frameTime - currentReceivedAtMs) / interpolationWindowMs)) : 1;
+      const interpolation = {
+        alpha: interpolationAlpha,
+        currentFrame: current?.frame,
+        previousFrame: previous?.frame,
+      };
+      const target = followAgentRef.current
+        ? getAgentRenderPosition(world, world.selectedAgentId, interpolation)
+        : undefined;
+      const effectivePan = target ? getPanToCenterWorldPoint(world, size, zoomRef.current, target) : panRef.current;
+      const effectiveViewport = target
+        ? calculateViewport(
+            { width: world.width, height: world.height },
+            size.width,
+            size.height,
+            zoomRef.current,
+            effectivePan,
+          )
+        : viewport;
+
+      if (target) {
+        panRef.current = effectivePan;
+        viewportRef.current = effectiveViewport;
+      }
+
+      const staticLayerKey = getStaticWorldCacheKey(world, effectiveViewport);
       if (staticLayerKeyRef.current !== staticLayerKey) {
         staticLayerKeyRef.current = staticLayerKey;
         const layerCanvas = staticLayerRef.current ?? document.createElement('canvas');
@@ -154,7 +212,7 @@ export const App = () => {
         layerCanvas.height = size.height;
         const layerContext = layerCanvas.getContext('2d');
         if (layerContext) {
-          renderStaticWorld(layerContext, world, viewport);
+          renderStaticWorld(layerContext, world, effectiveViewport);
           staticLayerRef.current = layerCanvas;
         } else {
           staticLayerRef.current = null;
@@ -162,21 +220,13 @@ export const App = () => {
       }
 
       if (staticLayerRef.current && typeof context.drawImage === 'function') {
-        context.clearRect(0, 0, viewport.width, viewport.height);
+        context.clearRect(0, 0, effectiveViewport.width, effectiveViewport.height);
         context.drawImage(staticLayerRef.current, 0, 0);
       } else {
-        renderStaticWorld(context, world, viewport);
+        renderStaticWorld(context, world, effectiveViewport);
       }
 
-      const { previous, current, currentReceivedAtMs } = getRenderInterpolationState();
-      const interpolationAlpha =
-        previous && current ? Math.max(0, Math.min(1, (frameTime - currentReceivedAtMs) / msPerTick)) : 1;
-
-      renderDynamicWorld(context, world, viewport, overlayMode, {
-        alpha: interpolationAlpha,
-        currentFrame: current?.frame,
-        previousFrame: previous?.frame,
-      });
+      renderDynamicWorld(context, world, effectiveViewport, overlayMode, interpolation);
     };
 
     const renderFrame = (time: number) => {
@@ -187,7 +237,7 @@ export const App = () => {
     frame = requestAnimationFrame(renderFrame);
 
     return () => cancelAnimationFrame(frame);
-  }, [overlayMode, size.height, size.width, viewport]);
+  }, [overlayMode, size, viewport]);
 
   const getCanvasPoint = (
     event: PointerEvent<HTMLCanvasElement> | WheelEvent<HTMLCanvasElement>,
@@ -200,10 +250,15 @@ export const App = () => {
   };
 
   const handleCanvasAction = (point: CanvasPoint) => {
+    const currentViewport = viewportRef.current;
+    if (!currentViewport) {
+      return;
+    }
+
     if (buildMode !== 'select') {
-      const tile = tileFromCanvasPoint(point, viewport.tileSize, {
-        x: viewport.offsetX,
-        y: viewport.offsetY,
+      const tile = tileFromCanvasPoint(point, currentViewport.tileSize, {
+        x: currentViewport.offsetX,
+        y: currentViewport.offsetY,
       });
       if (tile.x >= 0 && tile.y >= 0 && tile.x < worldWidth && tile.y < worldHeight) {
         paintTile(tile.x, tile.y, buildMode);
@@ -212,11 +267,13 @@ export const App = () => {
     }
 
     const world = useWorldStore.getState().world;
+    const currentFrame = getRenderInterpolationState().current?.frame;
     const foundAgent = findAgentAtCanvasPoint(
       world,
       point,
-      viewport.tileSize,
-      { x: viewport.offsetX, y: viewport.offsetY },
+      currentViewport.tileSize,
+      { x: currentViewport.offsetX, y: currentViewport.offsetY },
+      currentFrame,
     );
     selectAgent(foundAgent?.id);
   };
@@ -254,6 +311,10 @@ export const App = () => {
     const moved = Math.abs(dx) >= DRAG_THRESHOLD_PX || Math.abs(dy) >= DRAG_THRESHOLD_PX;
 
     if (moved && !dragState.moved) {
+      if (followAgentRef.current) {
+        followAgentRef.current = false;
+        setFollowAgent(false);
+      }
       dragStateRef.current = { ...dragState, moved: true };
     }
 
@@ -390,7 +451,10 @@ export const App = () => {
           title="Inspector"
           className="right-[18px] top-[18px] w-[min(360px,calc(100vw-32px))] max-[960px]:bottom-[18px] max-[960px]:left-[18px] max-[960px]:right-auto max-[960px]:top-auto max-[960px]:w-[min(320px,calc(100vw-36px))] max-[720px]:top-[344px] max-[720px]:bottom-auto max-[720px]:w-[calc(100vw-24px)]"
         >
-          <Inspector />
+          <Inspector
+            followActive={followAgent}
+            onFollowToggle={() => setFollowAgent((currentFollow) => !currentFollow)}
+          />
         </Drawer>
       </div>
     </main>

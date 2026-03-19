@@ -1,6 +1,6 @@
 import { AgentState } from '../sim/types';
 import { useWorldStore } from '../app/store';
-import { labelClass, panelClass, panelHeadingClass } from './styles';
+import { buttonClass, cx, labelClass, panelClass, panelHeadingClass, selectedButtonClass } from './styles';
 
 const stateColors: Record<AgentState, string> = {
   [AgentState.Idle]: '#3d4738',
@@ -13,7 +13,12 @@ const stateColors: Record<AgentState, string> = {
   [AgentState.Wandering]: '#76532d',
 };
 
-export const Inspector = () => {
+type InspectorProps = {
+  followActive: boolean;
+  onFollowToggle: () => void;
+};
+
+export const Inspector = ({ followActive, onFollowToggle }: InspectorProps) => {
   const selectedAgentId = useWorldStore((state) => state.world.selectedAgentId);
   const selectedAgentSnapshot = useWorldStore((state) => state.selectedAgentSnapshot);
   const agent = useWorldStore((state) =>
@@ -57,6 +62,14 @@ export const Inspector = () => {
               {agent.state}
             </span>
           </div>
+          <button
+            type="button"
+            className={cx(buttonClass, 'w-full', followActive && selectedButtonClass)}
+            aria-pressed={followActive}
+            onClick={onFollowToggle}
+          >
+            Follow
+          </button>
           <p className="m-0 italic text-[#5b4837]">"{agent.thought}"</p>
           <dl className="m-0 grid gap-2.5">
             <div className="flex justify-between gap-2.5 border-b border-[rgba(60,40,20,0.1)] pb-2">

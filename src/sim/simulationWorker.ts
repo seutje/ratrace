@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import { STARTER_WORLD_SEED, msPerTick } from './constants';
+import { STARTER_WORLD_SEED, msPerTick, workerSnapshotIntervalTicks } from './constants';
 import { stepWorldInPlace } from './stepWorld';
 import {
   agentStateOrder,
@@ -127,6 +127,14 @@ const publishDynamicSnapshot = () => {
   ]);
 };
 
+const publishTickSnapshot = () => {
+  if (world.tick % workerSnapshotIntervalTicks !== 0) {
+    return;
+  }
+
+  publishDynamicSnapshot();
+};
+
 const stopTickLoop = () => {
   if (tickTimer !== null) {
     self.clearTimeout(tickTimer);
@@ -150,7 +158,7 @@ function runTick() {
 
   const tickStartedAt = self.performance.now();
   world = stepWorldInPlace(world);
-  publishDynamicSnapshot();
+  publishTickSnapshot();
   const tickDuration = self.performance.now() - tickStartedAt;
   scheduleNextTick(Math.max(0, msPerTick - tickDuration));
 }

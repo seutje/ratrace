@@ -6,7 +6,17 @@ class ResizeObserverMock {
   disconnect() {}
 }
 
+class PointerEventMock extends MouseEvent {
+  pointerId: number;
+
+  constructor(type: string, init: MouseEventInit & { pointerId?: number } = {}) {
+    super(type, init);
+    this.pointerId = init.pointerId ?? 1;
+  }
+}
+
 vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+vi.stubGlobal('PointerEvent', PointerEventMock);
 const mockCanvasContext = {
   clearRect: vi.fn(),
   fillRect: vi.fn(),
@@ -26,3 +36,6 @@ const mockCanvasContext = {
 } as unknown as CanvasRenderingContext2D;
 
 HTMLCanvasElement.prototype.getContext = vi.fn(() => mockCanvasContext) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+HTMLCanvasElement.prototype.setPointerCapture = vi.fn();
+HTMLCanvasElement.prototype.releasePointerCapture = vi.fn();
+HTMLCanvasElement.prototype.hasPointerCapture = vi.fn(() => true);
