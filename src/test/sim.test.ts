@@ -672,6 +672,51 @@ describe('economy', () => {
     );
   });
 
+  it('prioritizes subsidy for businesses with the shortest payroll runway', () => {
+    const world = createBlankWorld(2, 1);
+    world.economy.treasury = TREASURY_RESERVE_TARGET + INDUSTRIAL_SUBSIDY_PER_HOUR;
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Commercial, buildingId: 'shop' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Industrial, buildingId: 'mill' });
+    world.entities.buildings.push({
+      id: 'shop',
+      kind: BuildingKind.Commercial,
+      tile: { x: 0, y: 0 },
+      cash: 30,
+      stock: 0,
+      capacity: 4,
+      pantryStock: 0,
+      pantryCapacity: 0,
+      label: 'shop',
+    });
+    world.entities.buildings.push({
+      id: 'mill',
+      kind: BuildingKind.Industrial,
+      tile: { x: 1, y: 0 },
+      cash: 36,
+      stock: 0,
+      capacity: 4,
+      pantryStock: 0,
+      pantryCapacity: 0,
+      label: 'mill',
+    });
+    world.entities.agents.push(
+      makeTestAgent({ id: 'clerk', workId: 'shop' }),
+      makeTestAgent({ id: 'mill-1', workId: 'mill' }),
+      makeTestAgent({ id: 'mill-2', workId: 'mill' }),
+      makeTestAgent({ id: 'mill-3', workId: 'mill' }),
+      makeTestAgent({ id: 'mill-4', workId: 'mill' }),
+    );
+    world.minutesOfDay = 59;
+
+    const next = stepWorld(world);
+
+    expect(next.entities.buildings.find((building) => building.id === 'shop')!.cash).toBe(30);
+    expect(next.entities.buildings.find((building) => building.id === 'mill')!.cash).toBe(
+      36 + INDUSTRIAL_SUBSIDY_PER_HOUR,
+    );
+    expect(next.economy.treasury).toBe(TREASURY_RESERVE_TARGET);
+  });
+
   it('keeps the treasury stable over the first day in the starter city', () => {
     const initial = createTestStarterWorld();
 

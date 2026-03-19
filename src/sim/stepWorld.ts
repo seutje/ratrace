@@ -898,6 +898,11 @@ const subsidizeBusinesses = (world: WorldState, buildingIndex: StepBuildingIndex
     return;
   }
 
+  const assignedWorkersByBuilding = new Map<string, number>();
+  for (const agent of world.entities.agents) {
+    assignedWorkersByBuilding.set(agent.workId, (assignedWorkersByBuilding.get(agent.workId) ?? 0) + 1);
+  }
+
   const businessesNeedingSupport = [
     ...getBuildingsByKind(buildingIndex, BuildingKind.Commercial).map((building) => ({
       building,
@@ -913,7 +918,13 @@ const subsidizeBusinesses = (world: WorldState, buildingIndex: StepBuildingIndex
     .filter(({ building, targetCash }) => building.cash < targetCash)
     .sort(
       (left, right) =>
-        left.building.cash - right.building.cash || left.building.id.localeCompare(right.building.id),
+        left.building.cash /
+          Math.max(HOURLY_WAGE, (assignedWorkersByBuilding.get(left.building.id) ?? 0) * HOURLY_WAGE) -
+          right.building.cash /
+            Math.max(HOURLY_WAGE, (assignedWorkersByBuilding.get(right.building.id) ?? 0) * HOURLY_WAGE) ||
+        left.building.cash / left.targetCash - right.building.cash / right.targetCash ||
+        left.building.cash - right.building.cash ||
+        left.building.id.localeCompare(right.building.id),
     );
 
   for (const { building, targetCash, subsidyPerHour } of businessesNeedingSupport) {
