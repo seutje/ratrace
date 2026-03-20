@@ -1,6 +1,6 @@
 # RatRace
 
-RatRace is a Vite + React + TypeScript city simulation with a deterministic fixed-step engine, a canvas world renderer, and React-driven HUD and inspector panels.
+RatRace is a city simulation with a deterministic fixed-step engine, a canvas world renderer, and HUD with inspector panels.
 
 ## Setup
 
