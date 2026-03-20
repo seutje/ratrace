@@ -161,6 +161,23 @@ describe('App', () => {
     expect(model.elements.find((entry) => entry.label === 'Traffic')?.active).toBe(true);
   });
 
+  it('includes wallet in the canvas overlays drawer', () => {
+    const model = buildCanvasUiModel(getCanvasUiState(createLocalCanvasUiState()));
+
+    expect(model.elements.some((entry) => entry.label === 'Wallet')).toBe(false);
+
+    const openState = {
+      ...createLocalCanvasUiState(),
+      drawers: {
+        ...defaultCanvasDrawerState,
+        overlays: true,
+      },
+    };
+    const openModel = buildCanvasUiModel(getCanvasUiState(openState));
+
+    expect(openModel.elements.some((entry) => entry.label === 'Wallet')).toBe(true);
+  });
+
   it('places the obituary drawer under overlays and exposes scroll overflow for long death logs', () => {
     const world = structuredClone(useWorldStore.getState().world);
     world.obituary = Array.from({ length: 18 }, (_, index) => ({
@@ -199,8 +216,7 @@ describe('App', () => {
     const canvas = screen.getByLabelText('RatRace world canvas');
     vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(CANVAS_RECT);
 
-    let localState = createLocalCanvasUiState();
-    localState = clickCanvasControl('Follow', localState);
+    clickCanvasControl('Follow', createLocalCanvasUiState());
 
     await waitFor(() => {
       expect(canvas).toHaveAttribute('data-follow-active', 'true');

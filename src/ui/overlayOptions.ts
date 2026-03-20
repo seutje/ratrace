@@ -10,6 +10,7 @@ export const overlayOptions: OverlayOption[] = [
   { mode: 'traffic', label: 'Traffic' },
   { mode: 'hunger', label: 'Hunger' },
   { mode: 'energy', label: 'Energy' },
+  { mode: 'wallet', label: 'Wallet' },
   { mode: 'housing', label: 'Housing' },
   { mode: 'businessCash', label: 'Cash' },
   { mode: 'retailStock', label: 'Retail Stock' },

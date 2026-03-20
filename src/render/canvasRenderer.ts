@@ -242,6 +242,78 @@ const renderAgentStatOverlay = (
   }
 };
 
+const walletLabelWidth = (label: string) => Math.max(44, Math.ceil(label.length * 7.2) + 16);
+
+const renderWalletOverlay = (
+  ctx: CanvasRenderingContext2D,
+  world: WorldState,
+  viewport: Viewport,
+  currentFrame?: CompactAgentFrame,
+) => {
+  if (world.entities.agents.length === 0) {
+    return;
+  }
+
+  const maxWallet = Math.max(1, ...world.entities.agents.map((agent) => agent.wallet));
+  const rankedAgents = [...world.entities.agents]
+    .sort((left, right) => right.wallet - left.wallet || left.name.localeCompare(right.name))
+    .slice(0, 5);
+  const leaderIds = new Set(rankedAgents.map((agent) => agent.id));
+
+  for (const [index, agent] of world.entities.agents.entries()) {
+    const wealthRatio = clamp01(agent.wallet / maxWallet);
+    if (wealthRatio <= 0.05) {
+      continue;
+    }
+
+    const posX = getFrameValue(currentFrame?.posX, index, agent.pos.x);
+    const posY = getFrameValue(currentFrame?.posY, index, agent.pos.y);
+    const x = viewport.offsetX + posX * viewport.tileSize;
+    const y = viewport.offsetY + posY * viewport.tileSize;
+    const isLeader = leaderIds.has(agent.id);
+
+    ctx.beginPath();
+    ctx.arc(x, y, viewport.tileSize * (0.24 + wealthRatio * 0.42), 0, Math.PI * 2);
+    ctx.fillStyle = getOverlayFill(43, 90, 52, 0.08 + wealthRatio * (isLeader ? 0.48 : 0.3));
+    ctx.fill();
+
+    if (!isLeader) {
+      continue;
+    }
+
+    ctx.beginPath();
+    ctx.arc(x, y, viewport.tileSize * (0.31 + wealthRatio * 0.3), 0, Math.PI * 2);
+    ctx.strokeStyle = getOverlayFill(28, 88, 34, 0.42 + wealthRatio * 0.4);
+    ctx.lineWidth = Math.max(1.5, viewport.tileSize * 0.09);
+    ctx.stroke();
+  }
+
+  ctx.font = "600 12px ui-monospace, 'SFMono-Regular', monospace";
+  for (const [rank, agent] of rankedAgents.entries()) {
+    const index = world.entities.agents.findIndex((entry) => entry.id === agent.id);
+    if (index < 0) {
+      continue;
+    }
+
+    const posX = getFrameValue(currentFrame?.posX, index, agent.pos.x);
+    const posY = getFrameValue(currentFrame?.posY, index, agent.pos.y);
+    const x = viewport.offsetX + posX * viewport.tileSize;
+    const y = viewport.offsetY + posY * viewport.tileSize;
+    const label = `${rank + 1}. ${agent.name} $${agent.wallet}`;
+    const width = walletLabelWidth(label);
+    const labelX = Math.round(x - width / 2);
+    const labelY = Math.round(y - viewport.tileSize * 0.95 - rank * 2);
+
+    ctx.fillStyle = 'rgba(58, 37, 10, 0.84)';
+    ctx.fillRect(labelX, labelY - 14, width, 18);
+    ctx.strokeStyle = 'rgba(255, 222, 145, 0.78)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(labelX, labelY - 14, width, 18);
+    ctx.fillStyle = '#fff6d8';
+    ctx.fillText(label, labelX + 8, labelY);
+  }
+};
+
 const renderOverlay = (
   ctx: CanvasRenderingContext2D,
   world: WorldState,
@@ -256,6 +328,9 @@ const renderOverlay = (
     case 'hunger':
     case 'energy':
       renderAgentStatOverlay(ctx, world, viewport, overlayMode, currentFrame);
+      break;
+    case 'wallet':
+      renderWalletOverlay(ctx, world, viewport, currentFrame);
       break;
     case 'housing':
       renderHousingOverlay(ctx, world, viewport);

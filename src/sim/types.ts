@@ -153,6 +153,7 @@ export type OverlayMode =
   | 'traffic'
   | 'hunger'
   | 'energy'
+  | 'wallet'
   | 'housing'
   | 'businessCash'
   | 'retailStock';
