@@ -2,8 +2,11 @@ import { DynamicAgentSnapshot } from '../sim/simulationWorkerTypes';
 import { BuildMode, ObituaryCause, OverlayMode, TileType, WorldState } from '../sim/types';
 import { formatClock } from '../sim/utils';
 import {
+  inspectorBuildingKindLabels,
   inspectorSexLabels,
   inspectorStateColors,
+  inspectorTileTypeColors,
+  inspectorTileTypeLabels,
   resolveInspectorData,
   type RelationshipEntry,
 } from '../ui/inspectorData';
@@ -418,7 +421,7 @@ const getToolsContentHeight = () => {
 
 const getInspectorContentHeight = (selectedAgentSnapshot: DynamicAgentSnapshot | undefined, world: WorldState, panelWidth: number) => {
   const details = resolveInspectorData(world, selectedAgentSnapshot);
-  if (!details.agent) {
+  if (details.kind === 'none') {
     return 126;
   }
   const bodyWidth = panelWidth - PANEL_PADDING * 2;
@@ -436,17 +439,10 @@ const getInspectorContentHeight = (selectedAgentSnapshot: DynamicAgentSnapshot |
     world,
     zoom: 1,
   });
-  const relationshipSections: InspectorRelationSection[] = [
-    { label: 'Roommates', entries: details.roommates },
-    { label: 'Had Child With', entries: details.coParents },
-    { label: 'Children', entries: details.children },
-    { label: 'Parents', entries: details.parents },
-  ];
+  const relationshipSections = getInspectorRelationshipSections(details);
 
   let height = 0;
-  height += 24;
-  height += 42 + 36 + 20;
-  height += 30;
+  height += details.kind === 'agent' ? 130 : 92;
   for (const row of rows) {
     const lines = row.values.flatMap((value) => wrapTextToWidth(value, valueWidth));
     height += lines.length * inspectorLineHeight + inspectorRowGap;
@@ -671,13 +667,61 @@ const buildObituaryPanel = (
   };
 };
 
+const getInspectorRelationshipSections = (
+  inspector: ReturnType<typeof resolveInspectorData>,
+): InspectorRelationSection[] => {
+  if (inspector.kind === 'tile') {
+    return [
+      { label: 'Residents', entries: inspector.tileResidents },
+      { label: 'Workers', entries: inspector.tileWorkers },
+    ];
+  }
+
+  if (inspector.kind === 'agent') {
+    return [
+      { label: 'Roommates', entries: inspector.roommates },
+      { label: 'Had Child With', entries: inspector.coParents },
+      { label: 'Children', entries: inspector.children },
+      { label: 'Parents', entries: inspector.parents },
+    ];
+  }
+
+  return [];
+};
+
 const buildInspectorRows = (state: CanvasUiLayoutState) => {
   const inspector = resolveInspectorData(state.world, state.selectedAgentSnapshot);
-  if (!inspector.agent) {
+  if (inspector.kind === 'none') {
     return [];
   }
 
-  const agent = inspector.agent;
+  if (inspector.kind === 'tile') {
+    const building = inspector.building;
+    return [
+      { label: 'Coords', values: [`${inspector.tile!.x}, ${inspector.tile!.y}`] },
+      { label: 'Type', values: [inspectorTileTypeLabels[inspector.tile!.type]] },
+      { label: 'Building', values: [building?.label ?? 'None'] },
+      { label: 'Building Id', values: [building?.id ?? 'None'] },
+      { label: 'Kind', values: [building ? inspectorBuildingKindLabels[building.kind] : 'None'] },
+      { label: 'Capacity', values: [building ? String(building.capacity) : 'None'] },
+      {
+        label: 'Assigned',
+        values: [
+          building
+            ? `Residents ${inspector.tileResidents.length} / Workers ${inspector.tileWorkers.length}`
+            : 'None',
+        ],
+      },
+      { label: 'Cash', values: [building ? `$${building.cash}` : 'None'] },
+      { label: 'Stock', values: [building ? String(building.stock) : 'None'] },
+      {
+        label: 'Pantry',
+        values: [building ? `${building.pantryStock}/${building.pantryCapacity}` : 'None'],
+      },
+    ];
+  }
+
+  const agent = inspector.agent!;
   return [
     { label: 'Age', values: [String(agent.age)] },
     { label: 'Sex', values: [inspectorSexLabels[agent.sex]] },
@@ -740,32 +784,29 @@ const buildInspectorPanel = (
   const bodyRect = panel.bodyRect;
   const inspector = resolveInspectorData(state.world, state.selectedAgentSnapshot);
   const inspectorRows = buildInspectorRows(state);
-  if (!inspector.agent) {
+  if (inspector.kind === 'none') {
     return { inspectorRows, panel };
   }
 
-  addButton(
-    elements,
-    'Follow',
-    makeRect(bodyRect.x, bodyRect.y + 42, bodyRect.width, 36),
-    { type: 'toggleFollow' },
-    { active: state.followActive },
-  );
+  if (inspector.kind === 'agent') {
+    addButton(
+      elements,
+      'Follow',
+      makeRect(bodyRect.x, bodyRect.y + 42, bodyRect.width, 36),
+      { type: 'toggleFollow' },
+      { active: state.followActive },
+    );
+  }
 
   const valueX = bodyRect.x + inspectorLabelWidth;
   const valueWidth = bodyRect.width - inspectorLabelWidth;
-  let relationY = bodyRect.y + 130;
+  let relationY = bodyRect.y + (inspector.kind === 'agent' ? 130 : 92);
   for (const row of inspectorRows) {
     const lines = row.values.flatMap((value) => wrapTextToWidth(value, valueWidth - 10));
     relationY += lines.length * inspectorLineHeight + inspectorRowGap;
   }
 
-  for (const section of [
-    { label: 'Roommates', entries: inspector.roommates },
-    { label: 'Had Child With', entries: inspector.coParents },
-    { label: 'Children', entries: inspector.children },
-    { label: 'Parents', entries: inspector.parents },
-  ] satisfies InspectorRelationSection[]) {
+  for (const section of getInspectorRelationshipSections(inspector)) {
     if (section.entries.length === 0) {
       relationY += getInspectorRelationshipSectionHeight(0);
       continue;
@@ -1031,30 +1072,51 @@ const drawInspectorBody = (ctx: CanvasRenderingContext2D, state: CanvasUiLayoutS
 
   const bodyRect = panel.bodyRect;
   const inspector = resolveInspectorData(state.world, state.selectedAgentSnapshot);
-  if (!inspector.agent) {
+  if (inspector.kind === 'none') {
     ctx.fillStyle = subduedTextColor;
     ctx.font = "500 14px 'Iowan Old Style', Georgia, serif";
-    ctx.fillText('Click an agent on the canvas to inspect them.', bodyRect.x, bodyRect.y + 22);
+    ctx.fillText('Click an agent or zoned tile on the canvas to inspect it.', bodyRect.x, bodyRect.y + 22);
     return;
   }
 
-  const agent = inspector.agent;
-  const stateBadgeWidth = Math.max(118, estimateTextWidth(agent.state, 'button') + 28);
-  ctx.fillStyle = textColor;
-  ctx.font = "700 20px 'Iowan Old Style', Georgia, serif";
-  ctx.fillText(agent.name, bodyRect.x, bodyRect.y + 18);
+  let rowY = bodyRect.y + 92;
+  if (inspector.kind === 'agent') {
+    const agent = inspector.agent!;
+    const stateBadgeWidth = Math.max(118, estimateTextWidth(agent.state, 'button') + 28);
+    ctx.fillStyle = textColor;
+    ctx.font = "700 20px 'Iowan Old Style', Georgia, serif";
+    ctx.fillText(agent.name, bodyRect.x, bodyRect.y + 18);
 
-  ctx.fillStyle = inspectorStateColors[agent.state];
-  ctx.fillRect(bodyRect.x + bodyRect.width - stateBadgeWidth, bodyRect.y, stateBadgeWidth, 24);
-  ctx.fillStyle = '#fffdf6';
-  ctx.font = "700 11px ui-monospace, 'SFMono-Regular', monospace";
-  ctx.fillText(agent.state, bodyRect.x + bodyRect.width - stateBadgeWidth + 10, bodyRect.y + 16);
+    ctx.fillStyle = inspectorStateColors[agent.state];
+    ctx.fillRect(bodyRect.x + bodyRect.width - stateBadgeWidth, bodyRect.y, stateBadgeWidth, 24);
+    ctx.fillStyle = '#fffdf6';
+    ctx.font = "700 11px ui-monospace, 'SFMono-Regular', monospace";
+    ctx.fillText(agent.state, bodyRect.x + bodyRect.width - stateBadgeWidth + 10, bodyRect.y + 16);
 
-  ctx.fillStyle = subduedTextColor;
-  ctx.font = "italic 14px 'Iowan Old Style', Georgia, serif";
-  ctx.fillText(`"${agent.thought}"`, bodyRect.x, bodyRect.y + 98);
+    ctx.fillStyle = subduedTextColor;
+    ctx.font = "italic 14px 'Iowan Old Style', Georgia, serif";
+    ctx.fillText(`"${agent.thought}"`, bodyRect.x, bodyRect.y + 98);
+    rowY = bodyRect.y + 130;
+  } else {
+    const tile = inspector.tile!;
+    const badgeLabel = inspectorTileTypeLabels[tile.type];
+    const tileTitle = inspector.building?.label ?? `${badgeLabel} Tile`;
+    const badgeWidth = Math.max(118, estimateTextWidth(badgeLabel, 'button') + 28);
+    ctx.fillStyle = textColor;
+    ctx.font = "700 20px 'Iowan Old Style', Georgia, serif";
+    ctx.fillText(tileTitle, bodyRect.x, bodyRect.y + 18);
 
-  let rowY = bodyRect.y + 130;
+    ctx.fillStyle = inspectorTileTypeColors[tile.type];
+    ctx.fillRect(bodyRect.x + bodyRect.width - badgeWidth, bodyRect.y, badgeWidth, 24);
+    ctx.fillStyle = '#fffdf6';
+    ctx.font = "700 11px ui-monospace, 'SFMono-Regular', monospace";
+    ctx.fillText(badgeLabel.toUpperCase(), bodyRect.x + bodyRect.width - badgeWidth + 10, bodyRect.y + 16);
+
+    ctx.fillStyle = subduedTextColor;
+    ctx.font = "600 12px ui-monospace, 'SFMono-Regular', monospace";
+    ctx.fillText(`tile ${tile.x},${tile.y}`, bodyRect.x, bodyRect.y + 46);
+  }
+
   const valueX = bodyRect.x + inspectorLabelWidth;
   const valueWidth = bodyRect.width - inspectorLabelWidth - 10;
   rows.forEach((row) => {
@@ -1071,12 +1133,7 @@ const drawInspectorBody = (ctx: CanvasRenderingContext2D, state: CanvasUiLayoutS
     rowY += lines.length * inspectorLineHeight + inspectorRowGap;
   });
 
-  for (const section of [
-    { label: 'Roommates', entries: inspector.roommates },
-    { label: 'Had Child With', entries: inspector.coParents },
-    { label: 'Children', entries: inspector.children },
-    { label: 'Parents', entries: inspector.parents },
-  ] satisfies InspectorRelationSection[]) {
+  for (const section of getInspectorRelationshipSections(inspector)) {
     ctx.fillStyle = subduedTextColor;
     ctx.font = "600 11px 'Iowan Old Style', Georgia, serif";
     ctx.fillText(section.label, bodyRect.x, rowY);

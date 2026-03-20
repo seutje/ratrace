@@ -2,6 +2,8 @@
 
 RatRace is a city simulation with a deterministic fixed-step engine, a canvas world renderer, and HUD with inspector panels.
 
+In `Select` mode, clicking an agent opens the inspector for that agent, and clicking a residential, commercial, or industrial tile opens the inspector for that tile. Zoned-tile inspection includes the tile coordinates, zoning type, building record, economic values, pantry values, assignment counts, and any linked residents or workers.
+
 ## Setup
 
 - `npm install`

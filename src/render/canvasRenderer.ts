@@ -1,5 +1,6 @@
 import { AgentState, BuildingKind, OverlayMode, TileType, WorldState } from '../sim/types';
 import { agentStateOrder, CompactAgentFrame } from '../sim/simulationWorkerTypes';
+import { getTile } from '../sim/utils';
 
 export type Viewport = {
   tileSize: number;
@@ -362,6 +363,21 @@ export const renderDynamicWorld = (
   const currentFrame = interpolation?.currentFrame;
   const previousFrame = interpolation?.previousFrame;
   renderOverlay(ctx, world, viewport, overlayMode, currentFrame);
+
+  if (world.selectedTile) {
+    const selectedTile = getTile(world, world.selectedTile);
+    if (selectedTile) {
+      const pixel = tileToPixel(selectedTile.x, selectedTile.y, viewport);
+      const inset = Math.max(1, Math.floor(viewport.tileSize * 0.08));
+      const size = Math.max(1, viewport.tileSize - inset * 2);
+      ctx.strokeStyle = 'rgba(255, 253, 246, 0.98)';
+      ctx.lineWidth = Math.max(2, Math.floor(viewport.tileSize * 0.1));
+      ctx.strokeRect(pixel.x + inset, pixel.y + inset, size, size);
+      ctx.strokeStyle = 'rgba(40, 26, 17, 0.72)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(pixel.x + inset + 1, pixel.y + inset + 1, Math.max(1, size - 2), Math.max(1, size - 2));
+    }
+  }
 
   for (const [index, agent] of world.entities.agents.entries()) {
     const canInterpolate =

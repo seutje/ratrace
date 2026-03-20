@@ -6,7 +6,7 @@ import {
 } from './constants';
 import { pickEmploymentAssignment } from './employment';
 import { createRuntimeBuildingLabel } from './naming';
-import { BuildMode, BuildingKind, TileType, WorldState } from './types';
+import { BuildMode, BuildingKind, Point, TileType, WorldState } from './types';
 import { getTile, setTile } from './utils';
 
 const buildingKindForTile = (type: TileType) => {
@@ -80,6 +80,13 @@ const reassignInvalidReferences = (world: WorldState) => {
 export const selectWorldAgent = (world: WorldState, agentId?: string): WorldState => ({
   ...world,
   selectedAgentId: agentId,
+  selectedTile: undefined,
+});
+
+export const selectWorldTile = (world: WorldState, tile?: Point): WorldState => ({
+  ...world,
+  selectedAgentId: undefined,
+  selectedTile: tile ? { ...tile } : undefined,
 });
 
 export const paintWorldTile = (sourceWorld: WorldState, x: number, y: number, mode: BuildMode): WorldState => {

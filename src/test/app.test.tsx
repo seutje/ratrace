@@ -9,6 +9,9 @@ import {
 } from '../render/canvasUi';
 import { DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM } from '../render/canvasRenderer';
 import { useWorldStore } from '../app/store';
+import { TileType } from '../sim/types';
+import { paintWorldTile } from '../sim/worldMutations';
+import { createBlankWorld } from '../sim/world';
 
 type LocalCanvasUiState = {
   drawers: CanvasDrawerState;
@@ -371,5 +374,35 @@ describe('App', () => {
     clickCanvasControl('Co Parent', createLocalCanvasUiState());
 
     expect(useWorldStore.getState().world.selectedAgentId).toBe(coParent!.id);
+  });
+
+  it('exposes zoned tile details in the inspector when a tile is selected', () => {
+    const world = paintWorldTile(createBlankWorld(8, 8), 3, 4, TileType.Industrial);
+    const building = world.entities.buildings[0]!;
+    useWorldStore.setState({
+      selectedAgentSnapshot: undefined,
+      world,
+    });
+    useWorldStore.getState().selectTile({ x: 3, y: 4 });
+
+    expect(useWorldStore.getState().world.selectedAgentId).toBeUndefined();
+    expect(useWorldStore.getState().world.selectedTile).toEqual({ x: 3, y: 4 });
+
+    const model = buildCanvasUiModel(getCanvasUiState(createLocalCanvasUiState()));
+    expect(model.inspectorRows).toEqual(
+      expect.arrayContaining([
+        { label: 'Coords', values: ['3, 4'] },
+        { label: 'Type', values: ['Industrial'] },
+        { label: 'Building', values: [building.label] },
+        { label: 'Building Id', values: [building.id] },
+        { label: 'Kind', values: ['Industrial'] },
+        { label: 'Capacity', values: ['4'] },
+        { label: 'Assigned', values: ['Residents 0 / Workers 0'] },
+        { label: 'Cash', values: [`$${building.cash}`] },
+        { label: 'Stock', values: [String(building.stock)] },
+        { label: 'Pantry', values: ['0/0'] },
+      ]),
+    );
+    expect(model.elements.some((entry) => entry.label === 'Follow')).toBe(false);
   });
 });

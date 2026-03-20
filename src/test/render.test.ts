@@ -157,6 +157,7 @@ describe('calculateViewport', () => {
       obituary: [],
       seed: 1,
       selectedAgentId: undefined,
+      selectedTile: undefined,
       tick: 1,
       tiles: Array.from({ length: 64 }, (_, index) => ({
         buildingId: undefined,

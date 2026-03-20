@@ -1,5 +1,5 @@
 import { dayMinutes } from './constants';
-import { Point, Tile, WorldState } from './types';
+import { Point, Tile, TileType, WorldState } from './types';
 
 export const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -33,6 +33,9 @@ export const samePoint = (left?: Point, right?: Point) =>
   Boolean(left && right && left.x === right.x && left.y === right.y);
 
 export const isSameTile = (left: Point, right: Point) => left.x === right.x && left.y === right.y;
+
+export const isZonedTileType = (type: TileType) =>
+  type === TileType.Residential || type === TileType.Commercial || type === TileType.Industrial;
 
 export const formatClock = (minutesOfDay: number) => {
   const hours = Math.floor(minutesOfDay / 60);

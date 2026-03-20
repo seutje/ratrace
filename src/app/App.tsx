@@ -21,6 +21,7 @@ import {
 } from '../render/canvasUi';
 import { useSimulationLoop } from '../render/useSimulationLoop';
 import { BuildMode, OverlayMode, WorldState } from '../sim/types';
+import { getTile, isZonedTileType } from '../sim/utils';
 import {
   findAgentAtCanvasPoint,
   getRenderInterpolationState,
@@ -110,6 +111,7 @@ export const App = () => {
   const setBuildMode = useWorldStore((state) => state.setBuildMode);
   const setOverlayMode = useWorldStore((state) => state.setOverlayMode);
   const selectAgent = useWorldStore((state) => state.selectAgent);
+  const selectTile = useWorldStore((state) => state.selectTile);
   const paintTile = useWorldStore((state) => state.paintTile);
 
   useEffect(() => {
@@ -342,7 +344,17 @@ export const App = () => {
       { x: currentViewport.offsetX, y: currentViewport.offsetY },
       currentFrame,
     );
-    selectAgent(foundAgent?.id);
+    if (foundAgent) {
+      selectAgent(foundAgent.id);
+      return;
+    }
+
+    const tile = tileFromCanvasPoint(point, currentViewport.tileSize, {
+      x: currentViewport.offsetX,
+      y: currentViewport.offsetY,
+    });
+    const selectedTile = getTile(world, tile);
+    selectTile(selectedTile && isZonedTileType(selectedTile.type) ? tile : undefined);
   };
 
   const resetView = () => {

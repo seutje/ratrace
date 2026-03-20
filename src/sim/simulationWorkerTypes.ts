@@ -5,6 +5,7 @@ import {
   BuildMode,
   Economy,
   ObituaryEntry,
+  Point,
   TrafficMap,
   WorldMetrics,
   WorldState,
@@ -24,21 +25,22 @@ export type DynamicAgentSnapshot = Omit<
 >;
 
 export const toDynamicAgentSnapshot = (agent: Agent): DynamicAgentSnapshot => {
-  const {
-    route,
-    routeIndex,
-    routeMapVersion,
-    commuteToWorkRoute,
-    commuteToWorkRouteMapVersion,
-    commuteToHomeRoute,
-    commuteToHomeRouteMapVersion,
-    travelPurpose,
-    travelStartTick,
-    ...snapshot
-  } = agent;
+  const snapshot = {
+    ...agent,
+  } as Partial<Agent>;
+
+  delete snapshot.route;
+  delete snapshot.routeIndex;
+  delete snapshot.routeMapVersion;
+  delete snapshot.commuteToWorkRoute;
+  delete snapshot.commuteToWorkRouteMapVersion;
+  delete snapshot.commuteToHomeRoute;
+  delete snapshot.commuteToHomeRouteMapVersion;
+  delete snapshot.travelPurpose;
+  delete snapshot.travelStartTick;
 
   return {
-    ...snapshot,
+    ...(snapshot as DynamicAgentSnapshot),
     childIds: agent.childIds.slice(),
     coParentIds: agent.coParentIds.slice(),
     destination: agent.destination ? { ...agent.destination } : undefined,
@@ -84,6 +86,7 @@ export type WorldDynamicSnapshot = {
   obituary: ObituaryEntry[];
   selectedAgent?: DynamicAgentSnapshot;
   selectedAgentId?: string;
+  selectedTile?: Point;
   tick: number;
   traffic: TrafficMap;
 };
@@ -110,6 +113,10 @@ export type SimulationWorkerInboundMessage =
   | {
       type: 'selectAgent';
       agentId?: string;
+    }
+  | {
+      type: 'selectTile';
+      tile?: Point;
     }
   | {
       type: 'paintTile';

@@ -10,7 +10,7 @@ import {
   WorldDynamicSnapshot,
   toDynamicAgentSnapshot,
 } from './simulationWorkerTypes';
-import { selectWorldAgent, paintWorldTile } from './worldMutations';
+import { paintWorldTile, selectWorldAgent, selectWorldTile } from './worldMutations';
 import { createStarterWorld } from './world';
 
 let world = createStarterWorld();
@@ -84,6 +84,7 @@ const publishDynamicSnapshot = () => {
     obituary: world.obituary.map((entry) => ({ ...entry })),
     selectedAgent: selectedAgent ? toDynamicAgentSnapshot(selectedAgent) : undefined,
     selectedAgentId: world.selectedAgentId,
+    selectedTile: world.selectedTile ? { ...world.selectedTile } : undefined,
     tick: world.tick,
     traffic: { ...world.traffic },
   };
@@ -184,6 +185,10 @@ self.onmessage = (event: MessageEvent<SimulationWorkerInboundMessage>) => {
       break;
     case 'selectAgent':
       world = selectWorldAgent(world, message.agentId);
+      publishDynamicSnapshot();
+      break;
+    case 'selectTile':
+      world = selectWorldTile(world, message.tile);
       publishDynamicSnapshot();
       break;
     case 'paintTile':

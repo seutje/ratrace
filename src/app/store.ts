@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
 import { MAX_FRAME_ADVANCE_MS, STARTER_WORLD_SEED, msPerTick } from '../sim/constants';
-import { BuildMode, OverlayMode, WorldState } from '../sim/types';
+import { BuildMode, OverlayMode, Point, WorldState } from '../sim/types';
 import {
   agentStateOrder,
   CompactAgentFrame,
@@ -11,7 +11,7 @@ import {
   WorldDynamicSnapshot,
   toDynamicAgentSnapshot,
 } from '../sim/simulationWorkerTypes';
-import { paintWorldTile, selectWorldAgent } from '../sim/worldMutations';
+import { paintWorldTile, selectWorldAgent, selectWorldTile } from '../sim/worldMutations';
 import { createStarterWorld } from '../sim/world';
 import { pointToTile } from '../sim/utils';
 
@@ -28,6 +28,7 @@ type WorldStore = {
   singleStep: () => void;
   advanceElapsed: (elapsedMs: number) => void;
   selectAgent: (agentId?: string) => void;
+  selectTile: (tile?: Point) => void;
   setBuildMode: (mode: BuildMode) => void;
   setOverlayMode: (mode: OverlayMode) => void;
   paintTile: (x: number, y: number, type: BuildMode) => void;
@@ -104,6 +105,7 @@ const toDynamicSnapshot = (world: WorldState): WorldDynamicSnapshot => ({
       })()
     : undefined,
   selectedAgentId: world.selectedAgentId,
+  selectedTile: world.selectedTile ? { ...world.selectedTile } : undefined,
   tick: world.tick,
   traffic: { ...world.traffic },
 });
@@ -177,6 +179,7 @@ const applyDynamicSnapshotToWorld = (world: WorldState, snapshot: WorldDynamicSn
     minutesOfDay: snapshot.minutesOfDay,
     obituary: snapshot.obituary.map((entry) => ({ ...entry })),
     selectedAgentId: snapshot.selectedAgentId,
+    selectedTile: snapshot.selectedTile ? { ...snapshot.selectedTile } : undefined,
     tick: snapshot.tick,
     traffic: { ...snapshot.traffic },
   };
@@ -355,6 +358,20 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
     set((state) => ({
       selectedAgentSnapshot: agentId === state.selectedAgentSnapshot?.id ? state.selectedAgentSnapshot : undefined,
       world: selectWorldAgent(state.world, agentId),
+    }));
+  },
+  selectTile: (tile) => {
+    if (simulationWorker) {
+      postSimulationWorkerMessage({
+        type: 'selectTile',
+        tile,
+      });
+      return;
+    }
+
+    set((state) => ({
+      selectedAgentSnapshot: undefined,
+      world: selectWorldTile(state.world, tile),
     }));
   },
   setBuildMode: (mode) => set({ buildMode: mode }),

@@ -172,6 +172,7 @@ export type WorldState = {
     buildings: Building[];
   };
   selectedAgentId?: string;
+  selectedTile?: Point;
   obituary: ObituaryEntry[];
   traffic: TrafficMap;
   metrics: WorldMetrics;
