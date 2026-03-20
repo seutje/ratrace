@@ -7,7 +7,7 @@ import {
   resolveInspectorData,
   type RelationshipEntry,
 } from '../ui/inspectorData';
-import { getOverlayModeLabel, overlayOptions } from '../ui/overlayOptions';
+import { overlayOptions } from '../ui/overlayOptions';
 
 export type Rect = {
   height: number;
@@ -497,13 +497,10 @@ const buildOverlaysPanel = (state: CanvasUiLayoutState, elements: CanvasUiElemen
   const rect = getOverlaysRect(state.width, state.drawers);
   const toggleLabel = `${state.drawers.overlays ? 'Hide' : 'Show'} Overlays`;
   const toggleRect = getToggleRect(rect, toggleLabel);
-  const summaryRect = getSummaryRect(rect, toggleRect, getOverlayModeLabel(state.overlayMode));
   const panel: CanvasUiPanel = {
     bodyRect: state.drawers.overlays ? makeRect(rect.x + PANEL_PADDING, rect.y + PANEL_HEADER_HEIGHT, rect.width - PANEL_PADDING * 2, rect.height - PANEL_HEADER_HEIGHT - PANEL_PADDING) : undefined,
     open: state.drawers.overlays,
     rect,
-    summary: getOverlayModeLabel(state.overlayMode),
-    summaryRect,
     title: 'Overlays',
     toggleRect,
     toggleElementId: addButton(elements, toggleLabel, toggleRect, {
