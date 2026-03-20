@@ -94,6 +94,8 @@ Movement is tile-based for routing but continuous for rendering.
 - Roads are cheaper than non-road tiles, so agents prefer the street network over cutting across zoning when both are possible.
 - Frequently requested destinations are promoted into a reverse goal-search cache, which makes repeated commutes cheaper to compute.
 - Agents also cache their home-to-work and work-to-home commute routes until the map changes.
+- While a route is active, the simulation reuses it by index and only invalidates it when the destination changes, the agent falls off the expected path, or `mapVersion` changes.
+- Nearest staffed retail targets are cached across the whole tile grid and rebuilt lazily when map edits or shop service availability change, which keeps pantry-refill and emergency-food decisions cheap even at high population.
 - Map edits increment `mapVersion`, which invalidates cached commute routes without recomputing them eagerly.
 
 Actual movement is incremental rather than teleporting:
