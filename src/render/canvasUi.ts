@@ -837,10 +837,6 @@ const drawPanel = (ctx: CanvasRenderingContext2D, panel: CanvasUiPanel) => {
   ctx.fillRect(panel.rect.x, panel.rect.y, panel.rect.width, panel.rect.height);
   ctx.strokeRect(panel.rect.x, panel.rect.y, panel.rect.width, panel.rect.height);
 
-  ctx.fillStyle = subduedTextColor;
-  ctx.font = "600 11px 'Iowan Old Style', Georgia, serif";
-  ctx.fillText('Drawer', panel.rect.x + PANEL_PADDING, panel.rect.y + 16);
-
   ctx.fillStyle = textColor;
   ctx.font = "700 22px 'Iowan Old Style', Georgia, serif";
   ctx.fillText(panel.title, panel.rect.x + PANEL_PADDING, panel.rect.y + 38);
