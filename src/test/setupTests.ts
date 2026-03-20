@@ -8,10 +8,14 @@ class ResizeObserverMock {
 
 class PointerEventMock extends MouseEvent {
   pointerId: number;
+  pointerType: string;
+  isPrimary: boolean;
 
-  constructor(type: string, init: MouseEventInit & { pointerId?: number } = {}) {
+  constructor(type: string, init: MouseEventInit & { pointerId?: number; pointerType?: string; isPrimary?: boolean } = {}) {
     super(type, init);
     this.pointerId = init.pointerId ?? 1;
+    this.pointerType = init.pointerType ?? 'mouse';
+    this.isPrimary = init.isPrimary ?? true;
   }
 }
 
@@ -26,6 +30,7 @@ const mockCanvasContext = {
   fill: vi.fn(),
   stroke: vi.fn(),
   fillText: vi.fn(),
+  drawImage: vi.fn(),
   save: vi.fn(),
   restore: vi.fn(),
   rect: vi.fn(),

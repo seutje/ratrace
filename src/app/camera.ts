@@ -1,4 +1,4 @@
-import { calculateViewport } from '../render/canvasRenderer';
+import { calculateViewport, DEFAULT_ZOOM, MAX_ZOOM } from '../render/canvasRenderer';
 import { CompactAgentFrame } from '../sim/simulationWorkerTypes';
 import { Point, WorldState } from '../sim/types';
 
@@ -12,6 +12,9 @@ type AgentInterpolation = {
   currentFrame?: CompactAgentFrame;
   previousFrame?: CompactAgentFrame;
 };
+
+const MOBILE_CAMERA_BREAKPOINT = 720;
+const MOBILE_TARGET_TILE_SIZE = 4;
 
 const getFramePosition = (frame: CompactAgentFrame | undefined, index: number, fallback: Point) => ({
   x: frame && index < frame.posX.length ? frame.posX[index]! : fallback.x,
@@ -58,4 +61,16 @@ export const getPanToCenterWorldPoint = (
     x: size.width / 2 - point.x * centeredViewport.tileSize - centeredViewport.offsetX,
     y: size.height / 2 - point.y * centeredViewport.tileSize - centeredViewport.offsetY,
   };
+};
+
+export const getDefaultZoomForViewport = (
+  world: Pick<WorldState, 'width' | 'height'>,
+  size: CanvasSize,
+) => {
+  if (size.width <= 0 || size.height <= 0 || size.width > MOBILE_CAMERA_BREAKPOINT) {
+    return DEFAULT_ZOOM;
+  }
+
+  const fittedTileSize = Math.max(1, Math.floor(Math.min(size.width / world.width, size.height / world.height)));
+  return Math.min(MAX_ZOOM, Math.max(DEFAULT_ZOOM, MOBILE_TARGET_TILE_SIZE / fittedTileSize));
 };

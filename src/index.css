@@ -23,7 +23,7 @@
   html,
   body,
   #root {
-    @apply m-0 h-full min-h-full w-full min-w-80 overflow-hidden;
+    @apply m-0 h-full min-h-full w-full min-w-80 overflow-hidden overscroll-none;
   }
 
   button {

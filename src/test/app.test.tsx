@@ -3,6 +3,7 @@ import { App } from '../app/App';
 import {
   buildCanvasUiModel,
   defaultCanvasDrawerState,
+  getDefaultCanvasDrawerState,
   type CanvasDrawerState,
   type CanvasScrollState,
   type CanvasUiAction,
@@ -148,6 +149,38 @@ describe('App', () => {
     });
   });
 
+  it('captures touch gestures on the canvas and pinch-zooms the map', async () => {
+    render(<App />);
+
+    const canvas = screen.getByLabelText('RatRace world canvas');
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(CANVAS_RECT);
+
+    expect(canvas.className).toContain('touch-none');
+
+    fireEvent.pointerDown(canvas, {
+      clientX: 320,
+      clientY: 320,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerDown(canvas, {
+      clientX: 520,
+      clientY: 320,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerMove(canvas, {
+      clientX: 600,
+      clientY: 320,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+
+    await waitFor(() => {
+      expect(Number(canvas.getAttribute('data-zoom'))).toBeGreaterThan(DEFAULT_ZOOM);
+    });
+  });
+
   it('switches overlay modes from the canvas overlays drawer', () => {
     render(<App />);
 
@@ -208,6 +241,39 @@ describe('App', () => {
     const scrolledModel = buildCanvasUiModel(getCanvasUiState(scrolledState));
 
     expect(scrolledModel.obituaryRows[0]!.rect.y).toBeLessThan(model.obituaryRows[0]!.rect.y);
+  });
+
+  it('uses compact mobile drawer defaults and keeps mobile panels from overlapping', () => {
+    expect(getDefaultCanvasDrawerState(390)).toEqual({
+      ...defaultCanvasDrawerState,
+      inspector: false,
+      obituary: false,
+    });
+
+    const mobileModel = buildCanvasUiModel({
+      buildMode: 'select',
+      drawers: {
+        ...defaultCanvasDrawerState,
+        inspector: true,
+        obituary: true,
+        overlays: true,
+        tools: true,
+      },
+      followActive: false,
+      height: 844,
+      overlayMode: 'none',
+      paused: false,
+      scrollOffsets: { obituary: 0 },
+      selectedAgentSnapshot: undefined,
+      width: 390,
+      world: useWorldStore.getState().world,
+      zoom: DEFAULT_ZOOM,
+    });
+    const [overviewPanel, overlaysPanel, obituaryPanel, toolsPanel, inspectorPanel] = mobileModel.panels;
+
+    expect(overlaysPanel!.rect.y).toBeGreaterThanOrEqual(overviewPanel!.rect.y + overviewPanel!.rect.height);
+    expect(obituaryPanel!.rect.y).toBeGreaterThanOrEqual(overlaysPanel!.rect.y + overlaysPanel!.rect.height);
+    expect(inspectorPanel!.rect.y + inspectorPanel!.rect.height).toBeLessThanOrEqual(toolsPanel!.rect.y);
   });
 
   it('activates follow mode from the canvas inspector and deactivates it when the map is dragged', async () => {

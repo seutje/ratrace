@@ -1,4 +1,4 @@
-import { getAgentRenderPosition, getPanToCenterWorldPoint } from '../app/camera';
+import { getAgentRenderPosition, getDefaultZoomForViewport, getPanToCenterWorldPoint } from '../app/camera';
 import { createStarterWorld } from '../sim/world';
 
 describe('camera helpers', () => {
@@ -39,5 +39,10 @@ describe('camera helpers', () => {
       x: agent.pos.x + 1,
       y: agent.pos.y + 2,
     });
+  });
+
+  it('starts mobile view closer to the map', () => {
+    expect(getDefaultZoomForViewport({ width: 144, height: 96 }, { width: 390, height: 844 })).toBe(2);
+    expect(getDefaultZoomForViewport({ width: 144, height: 96 }, { width: 960, height: 640 })).toBe(1);
   });
 });

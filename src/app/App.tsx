@@ -10,9 +10,9 @@ import {
 } from '../render/canvasRenderer';
 import {
   buildCanvasUiModel,
-  defaultCanvasDrawerState,
   findCanvasUiScrollRegionAtPoint,
   findCanvasUiElementAtPoint,
+  getDefaultCanvasDrawerState,
   isCanvasUiPoint,
   renderCanvasUi,
   type CanvasDrawerState,
@@ -30,7 +30,7 @@ import {
   tileFromCanvasPoint,
   useWorldStore,
 } from './store';
-import { getAgentRenderPosition, getPanToCenterWorldPoint } from './camera';
+import { getAgentRenderPosition, getDefaultZoomForViewport, getPanToCenterWorldPoint } from './camera';
 import { msPerTick } from '../sim/constants';
 
 type CanvasSize = {
@@ -48,6 +48,11 @@ type CanvasPoint = {
   y: number;
 };
 
+type TouchPointState = {
+  point: CanvasPoint;
+  startedOnUi: boolean;
+};
+
 type DragState = {
   kind: 'canvas';
   moved: boolean;
@@ -60,15 +65,30 @@ type DragState = {
   pressedElementId?: string;
 };
 
+type PinchState = {
+  pointerIds: [number, number];
+  startDistance: number;
+  startZoom: number;
+  worldPoint: CanvasPoint;
+};
+
 const zoomIn = (zoom: number) => Math.min(MAX_ZOOM, zoom * 2);
 const zoomOut = (zoom: number) => Math.max(MIN_ZOOM, zoom / 2);
 const clampZoom = (zoom: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
 const DRAG_THRESHOLD_PX = 4;
 const MAX_INTERPOLATION_EXTRAPOLATION = 0.18;
+const MOBILE_LAYOUT_BREAKPOINT = 720;
 const appBackgroundStyle = {
   background:
     'radial-gradient(circle at top left, rgba(232, 180, 94, 0.4), transparent 24%), radial-gradient(circle at bottom right, rgba(63, 109, 161, 0.24), transparent 24%), linear-gradient(180deg, #f8eedb 0%, #e4cda2 100%)',
 };
+
+const getPointDistance = (left: CanvasPoint, right: CanvasPoint) => Math.hypot(right.x - left.x, right.y - left.y);
+
+const getPointCenter = (left: CanvasPoint, right: CanvasPoint): CanvasPoint => ({
+  x: (left.x + right.x) / 2,
+  y: (left.y + right.y) / 2,
+});
 const appGlowStyle = {
   background:
     'radial-gradient(circle at 12% 18%, rgba(255, 255, 255, 0.42), transparent 22%), radial-gradient(circle at 86% 14%, rgba(255, 216, 154, 0.28), transparent 18%), linear-gradient(180deg, rgba(255, 244, 220, 0.12), rgba(59, 35, 12, 0.08))',
@@ -84,18 +104,25 @@ export const App = () => {
   const panRef = useRef<PanOffset>({ x: 0, y: 0 });
   const zoomRef = useRef(DEFAULT_ZOOM);
   const dragStateRef = useRef<DragState | null>(null);
+  const pinchStateRef = useRef<PinchState | null>(null);
+  const activeTouchPointsRef = useRef(new Map<number, TouchPointState>());
   const followAgentRef = useRef(false);
   const pausedRef = useRef(false);
   const buildModeRef = useRef<BuildMode>('select');
   const overlayModeRef = useRef<OverlayMode>('none');
-  const drawerStateRef = useRef<CanvasDrawerState>(defaultCanvasDrawerState);
+  const drawerStateRef = useRef<CanvasDrawerState>(getDefaultCanvasDrawerState(0));
   const scrollStateRef = useRef<CanvasScrollState>({ obituary: 0 });
+  const cameraPresetAppliedRef = useRef(false);
+  const cameraTouchedRef = useRef(false);
+  const drawerPresetAppliedRef = useRef(false);
+  const drawerTouchedRef = useRef(false);
   const [size, setSize] = useState<CanvasSize>({ width: 960, height: 640 });
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [pan, setPan] = useState<PanOffset>({ x: 0, y: 0 });
   const [followAgent, setFollowAgent] = useState(false);
-  const [drawerState, setDrawerState] = useState<CanvasDrawerState>(defaultCanvasDrawerState);
+  const [drawerState, setDrawerState] = useState<CanvasDrawerState>(getDefaultCanvasDrawerState(0));
   const [scrollState, setScrollState] = useState<CanvasScrollState>({ obituary: 0 });
+  const mobileLayout = size.width <= MOBILE_LAYOUT_BREAKPOINT;
 
   const worldWidth = useWorldStore((state) => state.world.width);
   const worldHeight = useWorldStore((state) => state.world.height);
@@ -141,6 +168,27 @@ export const App = () => {
     observer.observe(stage);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    const nextZoom = getDefaultZoomForViewport({ width: worldWidth, height: worldHeight }, size);
+    if (cameraPresetAppliedRef.current && cameraTouchedRef.current) {
+      return;
+    }
+
+    cameraPresetAppliedRef.current = true;
+    setZoom(nextZoom);
+    setPan({ x: 0, y: 0 });
+  }, [size, worldHeight, worldWidth]);
+
+  useEffect(() => {
+    const nextDrawerState = getDefaultCanvasDrawerState(size.width);
+    if (drawerPresetAppliedRef.current && drawerTouchedRef.current) {
+      return;
+    }
+
+    drawerPresetAppliedRef.current = true;
+    setDrawerState(nextDrawerState);
+  }, [size.width]);
 
   const viewport = useMemo(
     () => calculateViewport({ width: worldWidth, height: worldHeight }, size.width, size.height, zoom, pan),
@@ -318,6 +366,66 @@ export const App = () => {
     };
   };
 
+  const markCameraTouched = () => {
+    cameraTouchedRef.current = true;
+  };
+
+  const setSecondaryDrawerState = (drawer: Exclude<keyof CanvasDrawerState, 'overview'>) => {
+    drawerTouchedRef.current = true;
+    setDrawerState((current) => {
+      const nextOpen = !current[drawer];
+      if (!mobileLayout || !nextOpen) {
+        return {
+          ...current,
+          [drawer]: nextOpen,
+        };
+      }
+
+      return {
+        ...current,
+        inspector: false,
+        obituary: false,
+        overlays: false,
+        tools: false,
+        [drawer]: true,
+      };
+    });
+  };
+
+  const ensureMobileInspectorOpen = () => {
+    if (!mobileLayout) {
+      return;
+    }
+
+    drawerTouchedRef.current = true;
+    setDrawerState((current) => ({
+      ...current,
+      inspector: true,
+      obituary: false,
+      overlays: false,
+      tools: false,
+    }));
+  };
+
+  const zoomToCanvasPoint = (nextZoom: number, point: CanvasPoint, worldPoint?: CanvasPoint) => {
+    const currentViewport = viewportRef.current;
+    if (!currentViewport) {
+      return;
+    }
+
+    const anchorPoint = worldPoint ?? {
+      x: (point.x - currentViewport.offsetX) / currentViewport.tileSize,
+      y: (point.y - currentViewport.offsetY) / currentViewport.tileSize,
+    };
+    const centeredViewport = calculateViewport({ width: worldWidth, height: worldHeight }, size.width, size.height, nextZoom);
+
+    setZoom(nextZoom);
+    setPan({
+      x: point.x - anchorPoint.x * centeredViewport.tileSize - centeredViewport.offsetX,
+      y: point.y - anchorPoint.y * centeredViewport.tileSize - centeredViewport.offsetY,
+    });
+  };
+
   const handleCanvasAction = (point: CanvasPoint) => {
     const currentViewport = viewportRef.current;
     if (!currentViewport) {
@@ -346,6 +454,7 @@ export const App = () => {
     );
     if (foundAgent) {
       selectAgent(foundAgent.id);
+      ensureMobileInspectorOpen();
       return;
     }
 
@@ -355,10 +464,14 @@ export const App = () => {
     });
     const selectedTile = getTile(world, tile);
     selectTile(selectedTile && isZonedTileType(selectedTile.type) ? tile : undefined);
+    if (selectedTile && isZonedTileType(selectedTile.type)) {
+      ensureMobileInspectorOpen();
+    }
   };
 
   const resetView = () => {
-    setZoom(DEFAULT_ZOOM);
+    cameraTouchedRef.current = false;
+    setZoom(getDefaultZoomForViewport({ width: worldWidth, height: worldHeight }, size));
     setPan({ x: 0, y: 0 });
   };
 
@@ -381,10 +494,15 @@ export const App = () => {
   const handleCanvasUiAction = (action: CanvasUiAction) => {
     switch (action.type) {
       case 'toggleDrawer':
-        setDrawerState((current) => ({
-          ...current,
-          [action.drawer]: !current[action.drawer],
-        }));
+        if (action.drawer === 'overview') {
+          drawerTouchedRef.current = true;
+          setDrawerState((current) => ({
+            ...current,
+            overview: !current.overview,
+          }));
+        } else {
+          setSecondaryDrawerState(action.drawer);
+        }
         break;
       case 'togglePause':
         setPaused(!pausedRef.current);
@@ -396,9 +514,11 @@ export const App = () => {
         reset();
         break;
       case 'zoomIn':
+        markCameraTouched();
         setZoom((currentZoom) => zoomIn(currentZoom));
         break;
       case 'zoomOut':
+        markCameraTouched();
         setZoom((currentZoom) => zoomOut(currentZoom));
         break;
       case 'resetZoom':
@@ -415,12 +535,17 @@ export const App = () => {
         break;
       case 'selectAgent':
         selectAgent(action.agentId);
+        ensureMobileInspectorOpen();
         break;
     }
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLCanvasElement>) => {
-    if (event.button !== 0) {
+    if (event.pointerType === 'touch') {
+      event.preventDefault();
+    }
+
+    if (event.pointerType !== 'touch' && event.button !== 0) {
       return;
     }
 
@@ -428,6 +553,42 @@ export const App = () => {
     const uiModel = getCanvasUiModel();
     const uiElement = findCanvasUiElementAtPoint(uiModel, point);
     const uiPoint = uiElement ?? (isCanvasUiPoint(uiModel, point) ? { id: undefined } : undefined);
+    const startedOnUi = Boolean(uiPoint);
+
+    if (event.pointerType === 'touch') {
+      activeTouchPointsRef.current.set(event.pointerId, { point, startedOnUi });
+      event.currentTarget.setPointerCapture(event.pointerId);
+
+      if (activeTouchPointsRef.current.size === 2) {
+        const touchEntries = [...activeTouchPointsRef.current.entries()];
+        dragStateRef.current = null;
+
+        if (touchEntries.every(([, touchPoint]) => !touchPoint.startedOnUi)) {
+          const [[firstPointerId, firstTouch], [secondPointerId, secondTouch]] = touchEntries as [
+            [number, TouchPointState],
+            [number, TouchPointState],
+          ];
+          const startDistance = getPointDistance(firstTouch.point, secondTouch.point);
+          const currentViewport = viewportRef.current;
+
+          if (startDistance > 0 && currentViewport) {
+            const center = getPointCenter(firstTouch.point, secondTouch.point);
+            pinchStateRef.current = {
+              pointerIds: [firstPointerId, secondPointerId],
+              startDistance,
+              startZoom: zoomRef.current,
+              worldPoint: {
+                x: (center.x - currentViewport.offsetX) / currentViewport.tileSize,
+                y: (center.y - currentViewport.offsetY) / currentViewport.tileSize,
+              },
+            };
+          }
+        } else {
+          pinchStateRef.current = null;
+        }
+        return;
+      }
+    }
 
     if (uiPoint) {
       dragStateRef.current = {
@@ -450,6 +611,37 @@ export const App = () => {
   };
 
   const handlePointerMove = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (event.pointerType === 'touch') {
+      event.preventDefault();
+      const activeTouchPoint = activeTouchPointsRef.current.get(event.pointerId);
+      if (activeTouchPoint) {
+        activeTouchPointsRef.current.set(event.pointerId, {
+          ...activeTouchPoint,
+          point: getCanvasPoint(event),
+        });
+      }
+
+      const pinchState = pinchStateRef.current;
+      if (pinchState && pinchState.pointerIds.includes(event.pointerId)) {
+        const [firstPointer, secondPointer] = pinchState.pointerIds
+          .map((pointerId) => activeTouchPointsRef.current.get(pointerId)?.point)
+          .filter((point): point is CanvasPoint => Boolean(point));
+        if (firstPointer && secondPointer) {
+          if (followAgentRef.current) {
+            followAgentRef.current = false;
+            setFollowAgent(false);
+          }
+
+          const nextZoom = clampZoom(
+            pinchState.startZoom * (getPointDistance(firstPointer, secondPointer) / pinchState.startDistance),
+          );
+          markCameraTouched();
+          zoomToCanvasPoint(nextZoom, getPointCenter(firstPointer, secondPointer), pinchState.worldPoint);
+        }
+        return;
+      }
+    }
+
     const dragState = dragStateRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId || dragState.kind !== 'canvas') {
       return;
@@ -465,6 +657,7 @@ export const App = () => {
         followAgentRef.current = false;
         setFollowAgent(false);
       }
+      markCameraTouched();
       dragStateRef.current = { ...dragState, moved: true };
     }
 
@@ -475,13 +668,25 @@ export const App = () => {
   };
 
   const handlePointerRelease = (event: PointerEvent<HTMLCanvasElement>) => {
-    const dragState = dragStateRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) {
-      return;
+    if (event.pointerType === 'touch') {
+      event.preventDefault();
+      activeTouchPointsRef.current.delete(event.pointerId);
     }
 
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const pinchState = pinchStateRef.current;
+    if (pinchState?.pointerIds.includes(event.pointerId)) {
+      pinchStateRef.current = null;
+      dragStateRef.current = null;
+      return;
+    }
+
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
     }
 
     if (dragState.kind === 'ui') {
@@ -504,13 +709,18 @@ export const App = () => {
   };
 
   const handlePointerCancel = (event: PointerEvent<HTMLCanvasElement>) => {
-    const dragState = dragStateRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) {
-      return;
+    activeTouchPointsRef.current.delete(event.pointerId);
+    if (pinchStateRef.current?.pointerIds.includes(event.pointerId)) {
+      pinchStateRef.current = null;
     }
 
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
     }
 
     dragStateRef.current = null;
@@ -543,22 +753,14 @@ export const App = () => {
     if (isCanvasUiPoint(uiModel, point)) {
       return;
     }
-    const worldPoint = {
-      x: (point.x - currentViewport.offsetX) / currentViewport.tileSize,
-      y: (point.y - currentViewport.offsetY) / currentViewport.tileSize,
-    };
     const currentZoom = zoomRef.current;
     const nextZoom = clampZoom(currentZoom * Math.exp(-event.deltaY * 0.0015));
     if (nextZoom === currentZoom) {
       return;
     }
 
-    const centeredViewport = calculateViewport({ width: worldWidth, height: worldHeight }, size.width, size.height, nextZoom);
-    setZoom(nextZoom);
-    setPan({
-      x: point.x - worldPoint.x * centeredViewport.tileSize - centeredViewport.offsetX,
-      y: point.y - worldPoint.y * centeredViewport.tileSize - centeredViewport.offsetY,
-    });
+    markCameraTouched();
+    zoomToCanvasPoint(nextZoom, point);
   };
 
   return (
@@ -568,9 +770,10 @@ export const App = () => {
         <canvas
           aria-label="RatRace world canvas"
           ref={canvasRef}
-          className="block h-full w-full"
+          className="block h-full w-full touch-none"
           data-follow-active={String(followAgent)}
           data-zoom={zoom.toFixed(3)}
+          style={{ touchAction: 'none' }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerRelease}

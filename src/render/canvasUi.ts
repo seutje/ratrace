@@ -153,6 +153,15 @@ export const defaultCanvasDrawerState: CanvasDrawerState = {
   tools: false,
 };
 
+export const getDefaultCanvasDrawerState = (width: number): CanvasDrawerState =>
+  width <= 720
+    ? {
+        ...defaultCanvasDrawerState,
+        inspector: false,
+        obituary: false,
+      }
+    : { ...defaultCanvasDrawerState };
+
 const buildModeOptions: { label: string; mode: BuildMode }[] = [
   { label: 'Select', mode: 'select' },
   { label: 'Road', mode: TileType.Road },
@@ -185,6 +194,7 @@ const inspectorRelationshipButtonOffset = 12;
 
 const buttonTextWidthFactor = 8.1;
 const monoTextWidthFactor = 7.15;
+const overviewInlineCardThreshold = 330;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -261,7 +271,7 @@ const getSummaryRect = (panelRect: Rect, toggleRect: Rect, summary: string | und
 };
 
 const getOverviewContentHeight = (panelWidth: number) => {
-  if (panelWidth >= 560) {
+  if (panelWidth >= overviewInlineCardThreshold) {
     return 140;
   }
 
@@ -291,7 +301,7 @@ const getOverviewLayout = (bodyRect: Rect, world: WorldState): OverviewLayout =>
   const cardHeight = 74;
   const gap = 12;
 
-  if (bodyRect.width >= 560) {
+  if (bodyRect.width >= overviewInlineCardThreshold) {
     const cardWidth = Math.floor((bodyRect.width - gap * 2) / 3);
     const cardsY = bodyRect.y + 58;
 
@@ -358,13 +368,13 @@ const getOverviewRect = (width: number, drawers: CanvasDrawerState) => {
   return makeRect(Math.floor((width - panelWidth) / 2), y, panelWidth, heightValue);
 };
 
-const getOverlaysRect = (width: number, drawers: CanvasDrawerState) => {
+const getOverlaysRect = (width: number, drawers: CanvasDrawerState, overviewRect: Rect) => {
   const mobile = width <= 720;
   const tablet = width <= 960;
   const panelWidth = mobile
     ? Math.max(280, width - 24)
     : Math.min(tablet ? PANEL_WIDTH_OVERLAYS_TABLET : PANEL_WIDTH_OVERLAYS_DESKTOP, width - 36);
-  const y = mobile ? 136 : 18;
+  const y = mobile ? overviewRect.y + overviewRect.height + MOBILE_PANEL_STACK_GAP : 18;
   const heightValue = drawers.overlays ? OVERLAYS_DRAWER_HEIGHT : PANEL_HEADER_HEIGHT;
   return makeRect(mobile ? 12 : 18, y, panelWidth, heightValue);
 };
@@ -387,7 +397,9 @@ const getObituaryRect = (
   const boundaryY = tablet ? inspectorRect.y : toolsRect.y;
   const maxHeight = Math.max(PANEL_HEADER_HEIGHT, boundaryY - y - (mobile ? MOBILE_PANEL_STACK_GAP : PANEL_STACK_GAP));
   const desiredContentHeight =
-    tablet
+    mobile
+      ? Math.min(getObituaryContentHeight(state.world.obituary.length), 180)
+      : tablet
       ? Math.min(getObituaryContentHeight(state.world.obituary.length), 220)
       : Math.min(getObituaryContentHeight(state.world.obituary.length), 300);
   const desiredHeight = state.drawers.obituary
@@ -455,7 +467,13 @@ const getInspectorContentHeight = (selectedAgentSnapshot: DynamicAgentSnapshot |
   return height + 16;
 };
 
-const getInspectorRect = (width: number, height: number, drawers: CanvasDrawerState, state: CanvasUiLayoutState) => {
+const getInspectorRect = (
+  width: number,
+  height: number,
+  drawers: CanvasDrawerState,
+  state: CanvasUiLayoutState,
+  toolsRect: Rect,
+) => {
   const mobile = width <= 720;
   const tablet = width <= 960;
   const panelWidth = mobile
@@ -464,10 +482,10 @@ const getInspectorRect = (width: number, height: number, drawers: CanvasDrawerSt
   const desiredHeight = drawers.inspector
     ? getInspectorContentHeight(state.selectedAgentSnapshot, state.world, panelWidth) + PANEL_HEADER_HEIGHT + PANEL_PADDING
     : PANEL_HEADER_HEIGHT;
-  const maxHeight = mobile ? Math.max(160, height - 356) : tablet ? 420 : height - 36;
+  const maxHeight = mobile ? Math.max(180, Math.floor(height * 0.4)) : tablet ? 420 : height - 36;
   const panelHeight = clamp(desiredHeight, PANEL_HEADER_HEIGHT, maxHeight);
   const x = mobile ? 12 : tablet ? 18 : width - panelWidth - 18;
-  const y = mobile ? 344 : tablet ? height - panelHeight - 18 : 18;
+  const y = mobile ? Math.max(12, toolsRect.y - panelHeight - MOBILE_PANEL_STACK_GAP) : tablet ? height - panelHeight - 18 : 18;
   return makeRect(x, y, panelWidth, panelHeight);
 };
 
@@ -570,7 +588,8 @@ const buildToolsPanel = (state: CanvasUiLayoutState, elements: CanvasUiElement[]
 };
 
 const buildOverlaysPanel = (state: CanvasUiLayoutState, elements: CanvasUiElement[]): CanvasUiPanel => {
-  const rect = getOverlaysRect(state.width, state.drawers);
+  const overviewRect = getOverviewRect(state.width, state.drawers);
+  const rect = getOverlaysRect(state.width, state.drawers, overviewRect);
   const toggleLabel = `${state.drawers.overlays ? 'Hide' : 'Show'} Overlays`;
   const toggleRect = getToggleRect(rect, toggleLabel);
   const panel: CanvasUiPanel = {
@@ -761,8 +780,9 @@ const buildInspectorRows = (state: CanvasUiLayoutState) => {
 const buildInspectorPanel = (
   state: CanvasUiLayoutState,
   elements: CanvasUiElement[],
+  toolsRect: Rect,
 ): { inspectorRows: InspectorRow[]; panel: CanvasUiPanel } => {
-  const rect = getInspectorRect(state.width, state.height, state.drawers, state);
+  const rect = getInspectorRect(state.width, state.height, state.drawers, state, toolsRect);
   const toggleLabel = `${state.drawers.inspector ? 'Hide' : 'Show'} Inspector`;
   const toggleRect = getToggleRect(rect, toggleLabel);
   const panel: CanvasUiPanel = {
@@ -833,9 +853,9 @@ const buildInspectorPanel = (
 export const buildCanvasUiModel = (state: CanvasUiLayoutState): CanvasUiModel => {
   const elements: CanvasUiElement[] = [];
   const { metricCards, panel: overviewPanel } = buildOverviewPanel(state, elements);
-  const overlaysPanel = buildOverlaysPanel(state, elements);
   const toolsPanel = buildToolsPanel(state, elements);
-  const { inspectorRows, panel: inspectorPanel } = buildInspectorPanel(state, elements);
+  const overlaysPanel = buildOverlaysPanel(state, elements);
+  const { inspectorRows, panel: inspectorPanel } = buildInspectorPanel(state, elements, toolsPanel.rect);
   const { obituaryRows, panel: obituaryPanel, scrollRegion } = buildObituaryPanel(
     state,
     elements,
@@ -872,6 +892,7 @@ export const isCanvasUiPoint = (model: CanvasUiModel, point: CanvasUiPoint) =>
   model.panels.some((panel) => containsPoint(panel.rect, point));
 
 const drawPanel = (ctx: CanvasRenderingContext2D, panel: CanvasUiPanel) => {
+  const compact = panel.rect.width <= 420;
   ctx.fillStyle = panelFill;
   ctx.strokeStyle = panelStroke;
   ctx.lineWidth = 1;
@@ -879,7 +900,7 @@ const drawPanel = (ctx: CanvasRenderingContext2D, panel: CanvasUiPanel) => {
   ctx.strokeRect(panel.rect.x, panel.rect.y, panel.rect.width, panel.rect.height);
 
   ctx.fillStyle = textColor;
-  ctx.font = "700 22px 'Iowan Old Style', Georgia, serif";
+  ctx.font = compact ? "700 18px 'Iowan Old Style', Georgia, serif" : "700 22px 'Iowan Old Style', Georgia, serif";
   ctx.fillText(panel.title, panel.rect.x + PANEL_PADDING, panel.rect.y + 38);
 
   if (panel.summary) {
@@ -891,12 +912,13 @@ const drawPanel = (ctx: CanvasRenderingContext2D, panel: CanvasUiPanel) => {
     ctx.strokeRect(summaryRect.x, summaryRect.y, summaryRect.width, summaryRect.height);
 
     ctx.fillStyle = 'rgba(63, 74, 94, 0.9)';
-    ctx.font = "600 12px ui-monospace, 'SFMono-Regular', monospace";
+    ctx.font = compact ? "600 11px ui-monospace, 'SFMono-Regular', monospace" : "600 12px ui-monospace, 'SFMono-Regular', monospace";
     ctx.fillText(panel.summary, summaryRect.x + 12, summaryRect.y + 16);
   }
 };
 
 const drawButton = (ctx: CanvasRenderingContext2D, element: CanvasUiElement) => {
+  const compact = element.rect.width <= 168;
   const fill =
     element.disabled
       ? disabledFill
@@ -923,8 +945,12 @@ const drawButton = (ctx: CanvasRenderingContext2D, element: CanvasUiElement) => 
   ctx.fillStyle = element.kind === 'link' ? textColor : '#fffdf6';
   ctx.font =
     element.kind === 'link'
-      ? "600 12px ui-monospace, 'SFMono-Regular', monospace"
-      : "700 13px ui-monospace, 'SFMono-Regular', monospace";
+      ? compact
+        ? "600 11px ui-monospace, 'SFMono-Regular', monospace"
+        : "600 12px ui-monospace, 'SFMono-Regular', monospace"
+      : compact
+        ? "700 12px ui-monospace, 'SFMono-Regular', monospace"
+        : "700 13px ui-monospace, 'SFMono-Regular', monospace";
   ctx.save();
   ctx.beginPath();
   ctx.rect(element.rect.x, element.rect.y, element.rect.width, element.rect.height);
@@ -935,6 +961,7 @@ const drawButton = (ctx: CanvasRenderingContext2D, element: CanvasUiElement) => 
 
 const drawMetricCards = (ctx: CanvasRenderingContext2D, cards: MetricCard[]) => {
   for (const card of cards) {
+    const compact = card.rect.width <= 112;
     ctx.fillStyle = cardFill;
     ctx.strokeStyle = cardStroke;
     ctx.lineWidth = 1;
@@ -942,15 +969,15 @@ const drawMetricCards = (ctx: CanvasRenderingContext2D, cards: MetricCard[]) => 
     ctx.strokeRect(card.rect.x, card.rect.y, card.rect.width, card.rect.height);
 
     ctx.fillStyle = subduedTextColor;
-    ctx.font = "600 11px 'Iowan Old Style', Georgia, serif";
+    ctx.font = compact ? "600 10px 'Iowan Old Style', Georgia, serif" : "600 11px 'Iowan Old Style', Georgia, serif";
     ctx.fillText(card.label, card.rect.x + 12, card.rect.y + 18);
 
     ctx.fillStyle = textColor;
-    ctx.font = "700 24px 'Iowan Old Style', Georgia, serif";
+    ctx.font = compact ? "700 20px 'Iowan Old Style', Georgia, serif" : "700 24px 'Iowan Old Style', Georgia, serif";
     ctx.fillText(card.value, card.rect.x + 12, card.rect.y + 46);
 
     ctx.fillStyle = '#6a5c4f';
-    ctx.font = "600 12px ui-monospace, 'SFMono-Regular', monospace";
+    ctx.font = compact ? "600 11px ui-monospace, 'SFMono-Regular', monospace" : "600 12px ui-monospace, 'SFMono-Regular', monospace";
     ctx.fillText(card.caption, card.rect.x + 12, card.rect.y + 63);
   }
 };
@@ -961,18 +988,25 @@ const drawOverviewBody = (ctx: CanvasRenderingContext2D, panel: CanvasUiPanel, c
   }
 
   const bodyRect = panel.bodyRect;
+  const compact = panel.rect.width <= 420;
   const firstCard = cards[0];
   const introRect =
     firstCard && firstCard.rect.x > bodyRect.x + 24
       ? makeRect(bodyRect.x, bodyRect.y + 6, firstCard.rect.x - bodyRect.x - 18, 52)
       : makeRect(bodyRect.x, bodyRect.y + 4, bodyRect.width, 44);
   ctx.fillStyle = textColor;
-  ctx.font = "700 30px 'Iowan Old Style', Georgia, serif";
+  ctx.font = compact ? "700 24px 'Iowan Old Style', Georgia, serif" : "700 30px 'Iowan Old Style', Georgia, serif";
   ctx.fillText('RatRace', introRect.x, introRect.y + 18);
   ctx.fillStyle = subduedTextColor;
-  ctx.font = "500 14px 'Iowan Old Style', Georgia, serif";
+  ctx.font = compact
+    ? "500 12px 'Iowan Old Style', Georgia, serif"
+    : bodyRect.width < 340
+      ? "500 13px 'Iowan Old Style', Georgia, serif"
+      : "500 14px 'Iowan Old Style', Georgia, serif";
   ctx.fillText(
-    'Drag with the left mouse button to pan. Scroll to zoom the city like a map.',
+    bodyRect.width < 340
+      ? 'Drag to pan. Pinch or scroll to zoom.'
+      : 'Drag to pan. Pinch or scroll to zoom the city like a map.',
     introRect.x,
     introRect.y + 40,
   );
@@ -991,6 +1025,7 @@ const drawObituaryBody = (
   }
 
   const bodyRect = panel.bodyRect;
+  const compact = panel.rect.width <= 420;
   ctx.save();
   ctx.beginPath();
   ctx.rect(bodyRect.x, bodyRect.y, bodyRect.width, bodyRect.height);
@@ -998,7 +1033,7 @@ const drawObituaryBody = (
 
   if (rows.length === 0) {
     ctx.fillStyle = subduedTextColor;
-    ctx.font = "500 14px 'Iowan Old Style', Georgia, serif";
+    ctx.font = compact ? "500 12px 'Iowan Old Style', Georgia, serif" : "500 14px 'Iowan Old Style', Georgia, serif";
     ctx.fillText('No agents have died in this run yet.', bodyRect.x, bodyRect.y + 22);
     ctx.fillText('The list will fill in here at midnight.', bodyRect.x, bodyRect.y + 42);
     ctx.restore();
@@ -1020,11 +1055,11 @@ const drawObituaryBody = (
     ctx.fillRect(row.rect.x, row.rect.y, 6, row.rect.height);
 
     ctx.fillStyle = textColor;
-    ctx.font = "700 15px 'Iowan Old Style', Georgia, serif";
+    ctx.font = compact ? "700 13px 'Iowan Old Style', Georgia, serif" : "700 15px 'Iowan Old Style', Georgia, serif";
     ctx.fillText(row.name, row.rect.x + 14, row.rect.y + 20);
 
     ctx.fillStyle = subduedTextColor;
-    ctx.font = "600 12px ui-monospace, 'SFMono-Regular', monospace";
+    ctx.font = compact ? "600 11px ui-monospace, 'SFMono-Regular', monospace" : "600 12px ui-monospace, 'SFMono-Regular', monospace";
     ctx.fillText(row.detail, row.rect.x + 14, row.rect.y + 40);
   }
 
@@ -1057,11 +1092,11 @@ const drawToolsBody = (ctx: CanvasRenderingContext2D, panel: CanvasUiPanel) => {
 
   const bodyRect = panel.bodyRect;
   ctx.fillStyle = subduedTextColor;
-  ctx.font = "600 11px 'Iowan Old Style', Georgia, serif";
+  ctx.font = panel.rect.width <= 420 ? "600 10px 'Iowan Old Style', Georgia, serif" : "600 11px 'Iowan Old Style', Georgia, serif";
   ctx.fillText('Simulation', bodyRect.x, bodyRect.y + 12);
 
   ctx.fillStyle = subduedTextColor;
-  ctx.font = "600 11px 'Iowan Old Style', Georgia, serif";
+  ctx.font = panel.rect.width <= 420 ? "600 10px 'Iowan Old Style', Georgia, serif" : "600 11px 'Iowan Old Style', Georgia, serif";
   ctx.fillText('Build Menu', bodyRect.x, bodyRect.y + 78);
 };
 
@@ -1071,10 +1106,11 @@ const drawInspectorBody = (ctx: CanvasRenderingContext2D, state: CanvasUiLayoutS
   }
 
   const bodyRect = panel.bodyRect;
+  const compact = panel.rect.width <= 420;
   const inspector = resolveInspectorData(state.world, state.selectedAgentSnapshot);
   if (inspector.kind === 'none') {
     ctx.fillStyle = subduedTextColor;
-    ctx.font = "500 14px 'Iowan Old Style', Georgia, serif";
+    ctx.font = compact ? "500 12px 'Iowan Old Style', Georgia, serif" : "500 14px 'Iowan Old Style', Georgia, serif";
     ctx.fillText('Click an agent or zoned tile on the canvas to inspect it.', bodyRect.x, bodyRect.y + 22);
     return;
   }
@@ -1084,17 +1120,17 @@ const drawInspectorBody = (ctx: CanvasRenderingContext2D, state: CanvasUiLayoutS
     const agent = inspector.agent!;
     const stateBadgeWidth = Math.max(118, estimateTextWidth(agent.state, 'button') + 28);
     ctx.fillStyle = textColor;
-    ctx.font = "700 20px 'Iowan Old Style', Georgia, serif";
+    ctx.font = compact ? "700 17px 'Iowan Old Style', Georgia, serif" : "700 20px 'Iowan Old Style', Georgia, serif";
     ctx.fillText(agent.name, bodyRect.x, bodyRect.y + 18);
 
     ctx.fillStyle = inspectorStateColors[agent.state];
     ctx.fillRect(bodyRect.x + bodyRect.width - stateBadgeWidth, bodyRect.y, stateBadgeWidth, 24);
     ctx.fillStyle = '#fffdf6';
-    ctx.font = "700 11px ui-monospace, 'SFMono-Regular', monospace";
+    ctx.font = compact ? "700 10px ui-monospace, 'SFMono-Regular', monospace" : "700 11px ui-monospace, 'SFMono-Regular', monospace";
     ctx.fillText(agent.state, bodyRect.x + bodyRect.width - stateBadgeWidth + 10, bodyRect.y + 16);
 
     ctx.fillStyle = subduedTextColor;
-    ctx.font = "italic 14px 'Iowan Old Style', Georgia, serif";
+    ctx.font = compact ? "italic 12px 'Iowan Old Style', Georgia, serif" : "italic 14px 'Iowan Old Style', Georgia, serif";
     ctx.fillText(`"${agent.thought}"`, bodyRect.x, bodyRect.y + 98);
     rowY = bodyRect.y + 130;
   } else {
@@ -1103,17 +1139,17 @@ const drawInspectorBody = (ctx: CanvasRenderingContext2D, state: CanvasUiLayoutS
     const tileTitle = inspector.building?.label ?? `${badgeLabel} Tile`;
     const badgeWidth = Math.max(118, estimateTextWidth(badgeLabel, 'button') + 28);
     ctx.fillStyle = textColor;
-    ctx.font = "700 20px 'Iowan Old Style', Georgia, serif";
+    ctx.font = compact ? "700 17px 'Iowan Old Style', Georgia, serif" : "700 20px 'Iowan Old Style', Georgia, serif";
     ctx.fillText(tileTitle, bodyRect.x, bodyRect.y + 18);
 
     ctx.fillStyle = inspectorTileTypeColors[tile.type];
     ctx.fillRect(bodyRect.x + bodyRect.width - badgeWidth, bodyRect.y, badgeWidth, 24);
     ctx.fillStyle = '#fffdf6';
-    ctx.font = "700 11px ui-monospace, 'SFMono-Regular', monospace";
+    ctx.font = compact ? "700 10px ui-monospace, 'SFMono-Regular', monospace" : "700 11px ui-monospace, 'SFMono-Regular', monospace";
     ctx.fillText(badgeLabel.toUpperCase(), bodyRect.x + bodyRect.width - badgeWidth + 10, bodyRect.y + 16);
 
     ctx.fillStyle = subduedTextColor;
-    ctx.font = "600 12px ui-monospace, 'SFMono-Regular', monospace";
+    ctx.font = compact ? "600 11px ui-monospace, 'SFMono-Regular', monospace" : "600 12px ui-monospace, 'SFMono-Regular', monospace";
     ctx.fillText(`tile ${tile.x},${tile.y}`, bodyRect.x, bodyRect.y + 46);
   }
 
@@ -1121,12 +1157,12 @@ const drawInspectorBody = (ctx: CanvasRenderingContext2D, state: CanvasUiLayoutS
   const valueWidth = bodyRect.width - inspectorLabelWidth - 10;
   rows.forEach((row) => {
     ctx.fillStyle = subduedTextColor;
-    ctx.font = "600 11px 'Iowan Old Style', Georgia, serif";
+    ctx.font = compact ? "600 10px 'Iowan Old Style', Georgia, serif" : "600 11px 'Iowan Old Style', Georgia, serif";
     ctx.fillText(row.label, bodyRect.x, rowY);
 
     const lines = row.values.flatMap((value) => wrapTextToWidth(value, valueWidth));
     ctx.fillStyle = textColor;
-    ctx.font = "600 12px ui-monospace, 'SFMono-Regular', monospace";
+    ctx.font = compact ? "600 11px ui-monospace, 'SFMono-Regular', monospace" : "600 12px ui-monospace, 'SFMono-Regular', monospace";
     lines.forEach((line, index) => {
       ctx.fillText(line, valueX, rowY + index * inspectorLineHeight);
     });
@@ -1135,12 +1171,12 @@ const drawInspectorBody = (ctx: CanvasRenderingContext2D, state: CanvasUiLayoutS
 
   for (const section of getInspectorRelationshipSections(inspector)) {
     ctx.fillStyle = subduedTextColor;
-    ctx.font = "600 11px 'Iowan Old Style', Georgia, serif";
+    ctx.font = compact ? "600 10px 'Iowan Old Style', Georgia, serif" : "600 11px 'Iowan Old Style', Georgia, serif";
     ctx.fillText(section.label, bodyRect.x, rowY);
 
     if (section.entries.length === 0) {
       ctx.fillStyle = textColor;
-      ctx.font = "600 12px ui-monospace, 'SFMono-Regular', monospace";
+      ctx.font = compact ? "600 11px ui-monospace, 'SFMono-Regular', monospace" : "600 12px ui-monospace, 'SFMono-Regular', monospace";
       ctx.fillText('None', valueX, rowY);
       rowY += getInspectorRelationshipSectionHeight(0);
       continue;
