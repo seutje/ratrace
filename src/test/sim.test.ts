@@ -10,10 +10,13 @@ import {
   INDUSTRIAL_OUTPUT_PER_HOUR,
   INDUSTRIAL_STARTING_CASH,
   INDUSTRIAL_SUBSIDY_PER_HOUR,
+  MAX_AGENT_AGE,
   RETAIL_SALES_TAX_PER_UNIT,
   SLEEP_MINIMUM_MINUTES,
   SHOP_PRICE_PER_UNIT,
   STARTER_POPULATION,
+  STARTER_AGENT_MAX_AGE,
+  STARTER_AGENT_MIN_AGE,
   SHOPPING_BASKET_UNITS,
   SHOPPING_COOLDOWN_TICKS,
   SHOPPING_HUNGER_THRESHOLD,
@@ -75,6 +78,7 @@ const orthogonalNeighbors = ({ x, y }: { x: number; y: number }) => [
 const makeTestAgent = (overrides: Partial<WorldState['entities']['agents'][number]> = {}) => ({
   id: 'test-agent',
   name: 'Test Agent',
+  age: 30,
   sex: AgentSex.Female,
   pos: { x: 0.5, y: 0.5 },
   wallet: 20,
@@ -196,6 +200,10 @@ describe('world generation', () => {
     expect(world.entities.agents.every((agent) => agent.memory.averageCommuteMinutes === 0)).toBe(true);
     expect(world.entities.agents.every((agent) => agent.sex === AgentSex.Female || agent.sex === AgentSex.Male)).toBe(true);
     expect(world.entities.agents.every((agent) => firstNameBySex[agent.sex].has(getFirstName(agent.name)))).toBe(true);
+    expect(
+      world.entities.agents.every((agent) => agent.age >= STARTER_AGENT_MIN_AGE && agent.age <= STARTER_AGENT_MAX_AGE),
+    ).toBe(true);
+    expect(new Set(world.entities.agents.slice(0, 50).map((agent) => agent.age)).size).toBeGreaterThan(1);
     expect(new Set(world.entities.agents.slice(0, 50).map((agent) => agent.traits.appetite)).size).toBeGreaterThan(1);
   });
 
@@ -1618,6 +1626,50 @@ describe('traffic and lifecycle', () => {
     expect(world.entities.agents.find((entry) => entry.id === agent.id)?.maxHungerStreakDays).toBe(1);
   });
 
+  it('ages agents by one year each day and removes them at 100', () => {
+    let world = createBlankWorld(2, 1);
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Industrial, buildingId: 'work' });
+    world.entities.buildings.push(
+      {
+        id: 'home',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 2,
+        pantryStock: 4,
+        pantryCapacity: 4,
+        label: 'home',
+      },
+      {
+        id: 'work',
+        kind: BuildingKind.Industrial,
+        tile: { x: 1, y: 0 },
+        cash: INDUSTRIAL_STARTING_CASH,
+        stock: 0,
+        capacity: 2,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'work',
+      },
+    );
+    world.metrics.populationCapacity = 2;
+    world.entities.agents = [
+      makeTestAgent({ id: 'agent-1', age: MAX_AGENT_AGE - 2 }),
+      makeTestAgent({ id: 'agent-2', age: MAX_AGENT_AGE - 1 }),
+    ];
+    world.selectedAgentId = 'agent-2';
+    world.minutesOfDay = 23 * 60 + 59;
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents.map((agent) => ({ age: agent.age, id: agent.id }))).toEqual([
+      { age: MAX_AGENT_AGE - 1, id: 'agent-1' },
+    ]);
+    expect(world.selectedAgentId).toBeUndefined();
+  });
+
   it('grows a household when two residents can afford it and housing is available', () => {
     const world = createBlankWorld(4, 1);
     setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });
@@ -1684,6 +1736,7 @@ describe('traffic and lifecycle', () => {
     expect(next.entities.agents[2]!.sex === AgentSex.Female || next.entities.agents[2]!.sex === AgentSex.Male).toBe(true);
     expect(firstNameBySex[next.entities.agents[2]!.sex].has(getFirstName(next.entities.agents[2]!.name))).toBe(true);
     expect(getLastName(next.entities.agents[2]!.name)).toBe('Grove');
+    expect(next.entities.agents[2]!.age).toBe(0);
     expect(next.entities.agents[2]!.thought).toBe('New to the household.');
     expect(next.entities.agents[2]!.parentIds).toEqual(['agent-1', 'agent-2']);
     expect(next.entities.agents[0]!.childIds).toEqual([next.entities.agents[2]!.id]);

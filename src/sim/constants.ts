@@ -27,8 +27,11 @@ export const STARTER_ROAD_SPACING = 4;
 export const STARTER_RESIDENTIAL_CAPACITY = 4;
 export const STARTER_COMMERCIAL_CAPACITY = 18;
 export const STARTER_INDUSTRIAL_CAPACITY = 20;
+export const STARTER_AGENT_MIN_AGE = 18;
+export const STARTER_AGENT_MAX_AGE = 79;
 
 export const MAX_STAT = 100;
+export const MAX_AGENT_AGE = 100;
 export const SHOPPING_HUNGER_THRESHOLD = 60;
 export const SHOPPING_COOLDOWN_TICKS = 180;
 export const SLEEP_ENERGY_THRESHOLD = 20;

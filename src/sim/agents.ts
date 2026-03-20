@@ -1,3 +1,4 @@
+import { STARTER_AGENT_MAX_AGE, STARTER_AGENT_MIN_AGE } from './constants';
 import { createRng, Rng } from './random';
 import { Agent, AgentMemory, AgentSex, AgentTraits } from './types';
 
@@ -51,6 +52,12 @@ export const createInheritedAgentTraits = (
 
 export const createSeededAgentSex = (seed: number, saltParts: number[]): AgentSex =>
   createAgentSex(createRng(mixSeed(seed, ...saltParts)));
+
+export const createStartingAgentAge = (rng: Rng) =>
+  STARTER_AGENT_MIN_AGE + Math.floor(rng() * (STARTER_AGENT_MAX_AGE - STARTER_AGENT_MIN_AGE + 1));
+
+export const createSeededStartingAgentAge = (seed: number, saltParts: number[]) =>
+  createStartingAgentAge(createRng(mixSeed(seed, ...saltParts)));
 
 export const createAgentMemory = (): AgentMemory => ({
   averageCommuteMinutes: 0,

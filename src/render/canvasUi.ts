@@ -538,6 +538,7 @@ const buildInspectorRows = (state: CanvasUiLayoutState) => {
 
   const agent = inspector.agent;
   return [
+    { label: 'Age', values: [String(agent.age)] },
     { label: 'Sex', values: [inspectorSexLabels[agent.sex]] },
     { label: 'Wallet', values: [`$${agent.wallet}`] },
     { label: 'Lunches', values: [String(agent.carriedMeals)] },

@@ -10,6 +10,7 @@ import {
   INDUSTRIAL_OUTPUT_PER_HOUR,
   INDUSTRIAL_STARTING_CASH,
   INDUSTRIAL_SUBSIDY_PER_HOUR,
+  MAX_AGENT_AGE,
   MAX_STAT,
   PACKED_LUNCH_CAPACITY,
   PANTRY_MEAL_HUNGER_RECOVERY,
@@ -1342,6 +1343,7 @@ const createHouseholdGrowthAgent = (
   return {
     id: nextAgentId(world),
     name: createRuntimeAgentName(world, home.tile, assignment.shiftStartMinute, childSex, fatherLastName),
+    age: 0,
     sex: childSex,
     pos: { x: home.tile.x + 0.5, y: home.tile.y + 0.5 },
     wallet: 18,
@@ -1400,6 +1402,7 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
   }
 
   for (const agent of world.entities.agents) {
+    agent.age += 1;
     agent.daysInCity += 1;
     agent.maxHungerStreakDays =
       agent.keptMaxHungerToday && agent.stats.hunger >= MAX_STAT ? agent.maxHungerStreakDays + 1 : 0;
@@ -1409,7 +1412,9 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
     agent.keptMaxHungerToday = agent.stats.hunger >= MAX_STAT;
   }
 
-  world.entities.agents = world.entities.agents.filter((agent) => agent.maxHungerStreakDays < STARVATION_CULL_DAYS);
+  world.entities.agents = world.entities.agents.filter(
+    (agent) => agent.age < MAX_AGENT_AGE && agent.maxHungerStreakDays < STARVATION_CULL_DAYS,
+  );
   if (world.selectedAgentId && !world.entities.agents.some((agent) => agent.id === world.selectedAgentId)) {
     world.selectedAgentId = undefined;
   }

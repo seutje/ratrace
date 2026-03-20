@@ -34,7 +34,8 @@ The simulation runs as a deterministic fixed-step worker. One simulation tick ha
   - each agent gets a home from the available residential slots
   - each agent gets a workplace in either industry or retail
   - jobs receive staggered shift start times so the whole population does not move at once
-  - each agent starts with randomized wallet, stats, sex, and personality traits
+  - each agent starts with randomized wallet, stats, sex, personality traits, and an adult starting age
+  - starting ages are varied deterministically so the initial population does not all die off on the same day
 
 ### The fixed-step update loop
 
@@ -124,6 +125,9 @@ Economy totals are recomputed from treasury cash, agent wallets, business cash, 
 
 At midnight the simulation performs long-horizon lifecycle updates.
 
+- Every in-game day counts as one year of age.
+- Starter agents begin at varied adult ages, while newborn household-growth agents begin at age `0`.
+- Agents die after reaching age `100`.
 - Agents track whether they spent the day at maximum hunger.
 - Repeated full-hunger days increase hardship memory.
 - Agents that remain at maximum hunger for too many consecutive days are removed from the city.

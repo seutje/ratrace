@@ -91,6 +91,7 @@ export type AgentDestination = {
 export type Agent = {
   id: string;
   name: string;
+  age: number;
   sex: AgentSex;
   pos: Point;
   wallet: number;
