@@ -66,6 +66,11 @@ type MetricCard = {
   value: string;
 };
 
+type OverviewLayout = {
+  cards: MetricCard[];
+  introRect: Rect;
+};
+
 type InspectorRow = {
   label: string;
   values: string[];
@@ -96,7 +101,6 @@ export type CanvasUiLayoutState = {
   zoom: number;
 };
 
-const OVERVIEW_DRAWER_HEIGHT = 156;
 const OVERLAYS_DRAWER_HEIGHT = 250;
 const PANEL_HEADER_HEIGHT = 56;
 const PANEL_PADDING = 14;
@@ -222,13 +226,81 @@ const getSummaryRect = (panelRect: Rect, toggleRect: Rect, summary: string | und
   return makeRect(toggleRect.x - width - buttonGap, panelRect.y + 14, width, 24);
 };
 
+const getOverviewContentHeight = (panelWidth: number) => {
+  if (panelWidth >= 560) {
+    return 140;
+  }
+
+  return 284;
+};
+
+const getOverviewLayout = (bodyRect: Rect, world: WorldState): OverviewLayout => {
+  const cardHeight = 74;
+  const gap = 12;
+
+  if (bodyRect.width >= 560) {
+    const cardWidth = Math.floor((bodyRect.width - gap * 2) / 3);
+    const cardsY = bodyRect.y + 58;
+
+    return {
+      cards: [
+        {
+          caption: `day ${world.day}`,
+          label: 'World Time',
+          rect: makeRect(bodyRect.x, cardsY, cardWidth, cardHeight),
+          value: formatClock(world.minutesOfDay),
+        },
+        {
+          caption: `cap ${world.metrics.populationCapacity}`,
+          label: 'Population',
+          rect: makeRect(bodyRect.x + cardWidth + gap, cardsY, cardWidth, cardHeight),
+          value: String(world.entities.agents.length),
+        },
+        {
+          caption: `wealth ${world.economy.totalWealth}`,
+          label: 'Treasury',
+          rect: makeRect(bodyRect.x + (cardWidth + gap) * 2, cardsY, cardWidth, cardHeight),
+          value: `$${world.economy.treasury}`,
+        },
+      ],
+      introRect: makeRect(bodyRect.x, bodyRect.y + 4, bodyRect.width, 44),
+    };
+  }
+
+  const cardsY = bodyRect.y + 58;
+
+  return {
+    cards: [
+      {
+        caption: `day ${world.day}`,
+        label: 'World Time',
+        rect: makeRect(bodyRect.x, cardsY, bodyRect.width, cardHeight),
+        value: formatClock(world.minutesOfDay),
+      },
+      {
+        caption: `cap ${world.metrics.populationCapacity}`,
+        label: 'Population',
+        rect: makeRect(bodyRect.x, cardsY + cardHeight + gap, bodyRect.width, cardHeight),
+        value: String(world.entities.agents.length),
+      },
+      {
+        caption: `wealth ${world.economy.totalWealth}`,
+        label: 'Treasury',
+        rect: makeRect(bodyRect.x, cardsY + (cardHeight + gap) * 2, bodyRect.width, cardHeight),
+        value: `$${world.economy.treasury}`,
+      },
+    ],
+    introRect: makeRect(bodyRect.x, bodyRect.y + 4, bodyRect.width, 44),
+  };
+};
+
 const getOverviewRect = (width: number, drawers: CanvasDrawerState) => {
   const mobile = width <= 720;
   const tablet = width <= 960;
   const panelWidth = mobile
     ? Math.max(280, width - 24)
     : Math.min(tablet ? PANEL_WIDTH_OVERVIEW_TABLET : PANEL_WIDTH_OVERVIEW_DESKTOP, width - 36);
-  const heightValue = drawers.overview ? OVERVIEW_DRAWER_HEIGHT : PANEL_HEADER_HEIGHT;
+  const heightValue = drawers.overview ? getOverviewContentHeight(panelWidth) + PANEL_HEADER_HEIGHT + PANEL_PADDING : PANEL_HEADER_HEIGHT;
   const y = mobile ? 12 : 18;
   return makeRect(Math.floor((width - panelWidth) / 2), y, panelWidth, heightValue);
 };
@@ -367,28 +439,7 @@ const buildOverviewPanel = (state: CanvasUiLayoutState, elements: CanvasUiElemen
     return { metricCards: [], panel };
   }
 
-  const gutter = 12;
-  const cardWidth = Math.floor((panel.bodyRect.width - gutter * 2) / 3);
-  const cards: MetricCard[] = [
-    {
-      caption: `day ${state.world.day}`,
-      label: 'World Time',
-      rect: makeRect(panel.bodyRect.x, panel.bodyRect.y + 22, cardWidth, 74),
-      value: formatClock(state.world.minutesOfDay),
-    },
-    {
-      caption: `cap ${state.world.metrics.populationCapacity}`,
-      label: 'Population',
-      rect: makeRect(panel.bodyRect.x + cardWidth + gutter, panel.bodyRect.y + 22, cardWidth, 74),
-      value: String(state.world.entities.agents.length),
-    },
-    {
-      caption: `wealth ${state.world.economy.totalWealth}`,
-      label: 'Treasury',
-      rect: makeRect(panel.bodyRect.x + (cardWidth + gutter) * 2, panel.bodyRect.y + 22, cardWidth, 74),
-      value: `$${state.world.economy.treasury}`,
-    },
-  ];
+  const cards = getOverviewLayout(panel.bodyRect, state.world).cards;
 
   return { metricCards: cards, panel };
 };
@@ -719,12 +770,21 @@ const drawOverviewBody = (ctx: CanvasRenderingContext2D, panel: CanvasUiPanel, c
   }
 
   const bodyRect = panel.bodyRect;
+  const firstCard = cards[0];
+  const introRect =
+    firstCard && firstCard.rect.x > bodyRect.x + 24
+      ? makeRect(bodyRect.x, bodyRect.y + 6, firstCard.rect.x - bodyRect.x - 18, 52)
+      : makeRect(bodyRect.x, bodyRect.y + 4, bodyRect.width, 44);
   ctx.fillStyle = textColor;
   ctx.font = "700 30px 'Iowan Old Style', Georgia, serif";
-  ctx.fillText('RatRace', bodyRect.x, bodyRect.y + 18);
+  ctx.fillText('RatRace', introRect.x, introRect.y + 18);
   ctx.fillStyle = subduedTextColor;
   ctx.font = "500 14px 'Iowan Old Style', Georgia, serif";
-  ctx.fillText('Drag with the left mouse button to pan. Scroll to zoom the city like a map.', bodyRect.x, bodyRect.y + 40);
+  ctx.fillText(
+    'Drag with the left mouse button to pan. Scroll to zoom the city like a map.',
+    introRect.x,
+    introRect.y + 40,
+  );
 
   drawMetricCards(ctx, cards);
 };

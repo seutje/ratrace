@@ -114,6 +114,7 @@ describe('App', () => {
     expect(model.elements.some((entry) => entry.label === 'Show Tools')).toBe(true);
     expect(model.elements.find((entry) => entry.label === 'Show Overlays')?.rect.width).toBeGreaterThanOrEqual(120);
     expect(model.elements.some((entry) => entry.label === 'Reset Zoom')).toBe(false);
+    expect(model.metricCards[0]!.rect.y).toBeGreaterThan(model.panels[0]!.bodyRect!.y + 40);
   });
 
   it('updates the visible zoom level when the canvas is scrolled', async () => {
