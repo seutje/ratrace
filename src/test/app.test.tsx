@@ -180,6 +180,8 @@ describe('App', () => {
     expect(obituaryPanel.summary).toBeUndefined();
     expect(model.scrollRegions[0]?.id).toBe('obituary');
     expect(model.scrollRegions[0]?.maxOffset).toBeGreaterThan(0);
+    expect(model.obituaryRows[0]?.detail).toBe('#18 | Old age | day 10 | age 20');
+    expect(model.obituaryRows[1]?.detail).toBe('#17 | Starvation | day 11 | age 21');
 
     const scrolledState = createLocalCanvasUiState();
     scrolledState.scrollOffsets.obituary = 120;

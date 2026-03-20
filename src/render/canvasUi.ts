@@ -646,9 +646,10 @@ const buildObituaryPanel = (
   const contentHeight = getObituaryContentHeight(state.world.obituary.length);
   const maxOffset = Math.max(0, contentHeight - panel.bodyRect.height);
   const offset = clamp(state.scrollOffsets.obituary, 0, maxOffset);
+  const obituaryCount = state.world.obituary.length;
   const rows = state.world.obituary.map((entry, index) => ({
     cause: entry.cause,
-    detail: `${getObituaryCauseLabel(entry.cause)} | day ${entry.day} | age ${entry.age}`,
+    detail: `#${obituaryCount - index} | ${getObituaryCauseLabel(entry.cause)} | day ${entry.day} | age ${entry.age}`,
     name: entry.agentName,
     rect: makeRect(
       panel.bodyRect!.x,
