@@ -1,5 +1,5 @@
 import { DynamicAgentSnapshot } from '../sim/simulationWorkerTypes';
-import { Agent, AgentSex, AgentState, Building, BuildingKind, Tile, TileType, WorldState } from '../sim/types';
+import { Agent, AgentSex, AgentState, Building, BuildingKind, ObituaryEntry, Tile, TileType, WorldState } from '../sim/types';
 import { getTile, isZonedTileType } from '../sim/utils';
 
 export const inspectorStateColors: Record<AgentState, string> = {
@@ -76,6 +76,27 @@ const EMPTY_INSPECTOR_DATA: ResolvedInspectorData = {
   tileWorkers: EMPTY_ENTRIES,
 };
 
+type AgentNameSource = {
+  agents: Pick<Agent, 'id' | 'name'>[];
+  obituary: Pick<ObituaryEntry, 'agentId' | 'agentName'>[];
+};
+
+export const getKnownAgentNamesById = ({ agents, obituary }: AgentNameSource) => {
+  const namesById = new Map<string, string>();
+
+  for (const agent of agents) {
+    namesById.set(agent.id, agent.name);
+  }
+
+  for (const entry of obituary) {
+    if (!namesById.has(entry.agentId)) {
+      namesById.set(entry.agentId, entry.agentName);
+    }
+  }
+
+  return namesById;
+};
+
 const getRelationshipEntries = (agentIds: string[], namesById: Map<string, string>) =>
   Array.from(new Set(agentIds)).map((agentId) => ({
     id: agentId,
@@ -145,11 +166,13 @@ export const resolveInspectorData = (
     };
   }
 
-  const agentNamesById = new Map<string, string>();
+  const agentNamesById = getKnownAgentNamesById({
+    agents: world.entities.agents,
+    obituary: world.obituary,
+  });
   const residentsByHomeId = new Map<string, RelationshipEntry[]>();
 
   for (const worldAgent of world.entities.agents) {
-    agentNamesById.set(worldAgent.id, worldAgent.name);
     const entry = { id: worldAgent.id, name: worldAgent.name };
     const residents = residentsByHomeId.get(worldAgent.homeId);
 

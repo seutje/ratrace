@@ -364,6 +364,43 @@ describe('App', () => {
     }
   });
 
+  it('retains deceased agent names in relationship buttons', () => {
+    const world = structuredClone(useWorldStore.getState().world);
+    const [selected, deceasedParent] = world.entities.agents;
+
+    selected!.name = 'Selected Agent';
+    deceasedParent!.name = 'Parent One';
+    selected!.parentIds = [deceasedParent!.id];
+    selected!.childIds = [];
+    selected!.coParentIds = [];
+
+    world.entities.agents = world.entities.agents.filter((agent) => agent.id !== deceasedParent!.id);
+    world.obituary = [
+      {
+        agentId: deceasedParent!.id,
+        agentName: deceasedParent!.name,
+        age: deceasedParent!.age,
+        cause: 'old_age',
+        day: world.day,
+      },
+      ...world.obituary,
+    ];
+
+    useWorldStore.setState({
+      selectedAgentSnapshot: undefined,
+      world: {
+        ...world,
+        selectedAgentId: selected!.id,
+      },
+    });
+
+    const model = buildCanvasUiModel(getCanvasUiState(createLocalCanvasUiState()));
+    const labels = model.elements.map((entry) => entry.label);
+
+    expect(labels).toContain('Parent One');
+    expect(labels).not.toContain(deceasedParent!.id);
+  });
+
   it('top-aligns parent relationship buttons below an empty children row', () => {
     const world = structuredClone(useWorldStore.getState().world);
     const [selected, parentA, parentB, otherA, otherB] = [

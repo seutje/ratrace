@@ -4,7 +4,7 @@ RatRace is a city simulation with a deterministic fixed-step engine, a canvas wo
 
 On desktop, drag the canvas to pan and use the mouse wheel to zoom. On touch devices, drag with one finger to pan and use a two-finger pinch on the canvas to zoom. The mobile layout starts more zoomed-in, keeps secondary drawers collapsed by default, and opens the inspector drawer when you select an agent or zoned tile.
 
-In `Select` mode, clicking an agent opens the inspector for that agent, and clicking a residential, commercial, or industrial tile opens the inspector for that tile. Zoned-tile inspection includes the tile coordinates, zoning type, building record, economic values, pantry values, assignment counts, and any linked residents or workers.
+In `Select` mode, clicking an agent opens the inspector for that agent, and clicking a residential, commercial, or industrial tile opens the inspector for that tile. Zoned-tile inspection includes the tile coordinates, zoning type, building record, economic values, pantry values, assignment counts, and any linked residents or workers. Agent relationship links keep a deceased agent's recorded name after death instead of falling back to the raw `agent-####` id.
 
 ## Setup
 

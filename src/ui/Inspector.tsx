@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { AgentSex, AgentState, Agent, Building } from '../sim/types';
 import { useWorldStore } from '../app/store';
 import { buttonClass, cx, labelClass, panelClass, panelHeadingClass, selectedButtonClass } from './styles';
+import { getKnownAgentNamesById } from './inspectorData';
 
 const stateColors: Record<AgentState, string> = {
   [AgentState.Idle]: '#3d4738',
@@ -101,24 +102,26 @@ export const Inspector = ({ followActive, onFollowToggle }: InspectorProps) => {
   const worldAgents = useWorldStore((state) =>
     state.world.selectedAgentId !== undefined ? state.world.entities.agents : undefined,
   );
+  const obituary = useWorldStore((state) =>
+    state.world.selectedAgentId !== undefined ? state.world.obituary : undefined,
+  );
   const buildings = useWorldStore((state) =>
     state.world.selectedAgentId !== undefined ? state.world.entities.buildings : undefined,
   );
   const selectAgent = useWorldStore((state) => state.selectAgent);
 
   const agentIndexes = useMemo(() => {
-    if (!worldAgents) {
+    if (!worldAgents || !obituary) {
       return {
         agentNamesById: new Map<string, string>(),
         residentsByHomeId: new Map<string, RelationshipEntry[]>(),
       };
     }
 
-    const agentNamesById = new Map<string, string>();
+    const agentNamesById = getKnownAgentNamesById({ agents: worldAgents, obituary });
     const residentsByHomeId = new Map<string, RelationshipEntry[]>();
 
     for (const worldAgent of worldAgents) {
-      agentNamesById.set(worldAgent.id, worldAgent.name);
       const residents = residentsByHomeId.get(worldAgent.homeId);
       const entry = { id: worldAgent.id, name: worldAgent.name };
 
@@ -137,7 +140,7 @@ export const Inspector = ({ followActive, onFollowToggle }: InspectorProps) => {
       agentNamesById,
       residentsByHomeId,
     };
-  }, [worldAgents]);
+  }, [obituary, worldAgents]);
 
   const agent = useMemo(
     () =>
