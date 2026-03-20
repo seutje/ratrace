@@ -1,5 +1,6 @@
 import { DynamicAgentSnapshot } from '../sim/simulationWorkerTypes';
 import { BuildMode, ObituaryCause, OverlayMode, TileType, WorldState } from '../sim/types';
+import { SimulationStatisticsPoint } from '../app/statistics';
 import { formatClock } from '../sim/utils';
 import {
   inspectorBuildingKindLabels,
@@ -24,11 +25,11 @@ export type CanvasUiPoint = {
   y: number;
 };
 
-export type CanvasDrawerId = 'inspector' | 'obituary' | 'overview' | 'overlays' | 'tools';
+export type CanvasDrawerId = 'inspector' | 'statistics' | 'obituary' | 'overview' | 'overlays' | 'tools';
 
 export type CanvasDrawerState = Record<CanvasDrawerId, boolean>;
 
-export type CanvasScrollRegionId = 'obituary';
+export type CanvasScrollRegionId = 'obituary' | 'statistics';
 
 export type CanvasScrollState = Record<CanvasScrollRegionId, number>;
 
@@ -95,6 +96,16 @@ type ObituaryRow = {
   rect: Rect;
 };
 
+type StatisticsChart = {
+  deltaLabel: string;
+  label: string;
+  rect: Rect;
+  stroke: string;
+  trend: 'up' | 'down' | 'flat';
+  valueLabel: string;
+  values: number[];
+};
+
 export type CanvasUiScrollRegion = {
   id: CanvasScrollRegionId;
   maxOffset: number;
@@ -109,6 +120,7 @@ export type CanvasUiModel = {
   obituaryRows: ObituaryRow[];
   panels: CanvasUiPanel[];
   scrollRegions: CanvasUiScrollRegion[];
+  statisticsCharts: StatisticsChart[];
 };
 
 export type CanvasUiLayoutState = {
@@ -120,6 +132,7 @@ export type CanvasUiLayoutState = {
   paused: boolean;
   scrollOffsets: CanvasScrollState;
   selectedAgentSnapshot?: DynamicAgentSnapshot;
+  statisticsHistory: SimulationStatisticsPoint[];
   width: number;
   world: WorldState;
   zoom: number;
@@ -138,15 +151,22 @@ const PANEL_WIDTH_TOOLS_DESKTOP = 360;
 const PANEL_WIDTH_TOOLS_TABLET = 420;
 const PANEL_WIDTH_INSPECTOR_DESKTOP = 360;
 const PANEL_WIDTH_INSPECTOR_TABLET = 320;
+const PANEL_WIDTH_STATISTICS_DESKTOP = 420;
+const PANEL_WIDTH_STATISTICS_TABLET = 360;
 const PANEL_STACK_GAP = 18;
 const MOBILE_PANEL_STACK_GAP = 12;
 const obituaryEmptyHeight = 74;
 const obituaryRowHeight = 58;
 const obituaryRowGap = 8;
 const obituaryScrollbarWidth = 8;
+const statisticsChartHeight = 96;
+const statisticsChartGap = 12;
+const statisticsScrollbarWidth = 8;
+const statisticsHeaderCopyHeight = 40;
 
 export const defaultCanvasDrawerState: CanvasDrawerState = {
   inspector: true,
+  statistics: false,
   obituary: true,
   overview: true,
   overlays: false,
@@ -161,6 +181,68 @@ export const getDefaultCanvasDrawerState = (width: number): CanvasDrawerState =>
         obituary: false,
       }
     : { ...defaultCanvasDrawerState };
+
+const secondaryCanvasDrawers: Exclude<CanvasDrawerId, 'overview'>[] = [
+  'inspector',
+  'statistics',
+  'obituary',
+  'overlays',
+  'tools',
+];
+
+export const toggleCanvasDrawerState = (
+  current: CanvasDrawerState,
+  drawer: CanvasDrawerId,
+  mobileLayout: boolean,
+): CanvasDrawerState => {
+  if (drawer === 'overview') {
+    return {
+      ...current,
+      overview: !current.overview,
+    };
+  }
+
+  const nextOpen = !current[drawer];
+  const nextState: CanvasDrawerState = {
+    ...current,
+    [drawer]: nextOpen,
+  };
+
+  if (!nextOpen) {
+    return nextState;
+  }
+
+  if (drawer === 'inspector') {
+    nextState.statistics = false;
+  } else if (drawer === 'statistics') {
+    nextState.inspector = false;
+  }
+
+  if (!mobileLayout) {
+    return nextState;
+  }
+
+  for (const secondaryDrawer of secondaryCanvasDrawers) {
+    if (secondaryDrawer !== drawer) {
+      nextState[secondaryDrawer] = false;
+    }
+  }
+
+  nextState[drawer] = true;
+  return nextState;
+};
+
+export const revealInspectorDrawer = (current: CanvasDrawerState, mobileLayout: boolean): CanvasDrawerState =>
+  mobileLayout
+    ? {
+        ...current,
+        inspector: true,
+        statistics: false,
+        obituary: false,
+        overlays: false,
+        tools: false,
+      }
+    : current;
 
 const buildModeOptions: { label: string; mode: BuildMode }[] = [
   { label: 'Select', mode: 'select' },
@@ -297,6 +379,91 @@ const getObituaryContentHeight = (entryCount: number) => {
 
 const getObituaryCauseLabel = (cause: ObituaryCause) => (cause === 'starvation' ? 'Starvation' : 'Old age');
 
+const formatSignedNumber = (value: number, digits = 0) => {
+  const rounded = Number(value.toFixed(digits));
+  return `${rounded > 0 ? '+' : rounded < 0 ? '-' : ''}${Math.abs(rounded).toFixed(digits)}`;
+};
+
+const formatInteger = (value: number) => Math.round(value).toString();
+const formatDecimal = (value: number) => value.toFixed(1);
+const formatCurrency = (value: number) => `$${Math.round(value)}`;
+const formatPercent = (value: number) => `${Math.round(value)}%`;
+
+const getChartDeltaLabel = (currentValue: number, previousValue: number | undefined, formatter: (value: number) => string) => {
+  if (previousValue === undefined) {
+    return 'Starting point';
+  }
+
+  const delta = currentValue - previousValue;
+  if (Math.abs(delta) < 0.05) {
+    return 'No change';
+  }
+
+  return `${formatSignedNumber(delta, formatter === formatDecimal ? 1 : 0)} vs last`;
+};
+
+const statisticsChartDefinitions = [
+  { key: 'population', label: 'Population', stroke: '#9f4e27', value: (point: SimulationStatisticsPoint) => point.population, formatter: formatInteger },
+  { key: 'births', label: 'Births', stroke: '#0f6e69', value: (point: SimulationStatisticsPoint) => point.cumulativeBirths, formatter: formatInteger },
+  { key: 'deaths', label: 'Deaths', stroke: '#8f2c1a', value: (point: SimulationStatisticsPoint) => point.cumulativeDeaths, formatter: formatInteger },
+  { key: 'happiness', label: 'Avg Happiness', stroke: '#3c6c90', value: (point: SimulationStatisticsPoint) => point.averageHappiness, formatter: formatDecimal },
+  { key: 'hunger', label: 'Avg Hunger', stroke: '#b55c2f', value: (point: SimulationStatisticsPoint) => point.averageHunger, formatter: formatDecimal },
+  { key: 'energy', label: 'Avg Energy', stroke: '#30527f', value: (point: SimulationStatisticsPoint) => point.averageEnergy, formatter: formatDecimal },
+  { key: 'treasury', label: 'Treasury', stroke: '#6252ab', value: (point: SimulationStatisticsPoint) => point.treasury, formatter: formatCurrency },
+  { key: 'wealth', label: 'Total Wealth', stroke: '#3d4738', value: (point: SimulationStatisticsPoint) => point.totalWealth, formatter: formatCurrency },
+  { key: 'supply', label: 'Supply Stock', stroke: '#76532d', value: (point: SimulationStatisticsPoint) => point.supplyStock, formatter: formatInteger },
+  { key: 'traffic', label: 'Traffic Peak', stroke: '#214a67', value: (point: SimulationStatisticsPoint) => point.trafficPeak, formatter: formatInteger },
+  { key: 'retail', label: 'Retail Stock', stroke: '#2d8580', value: (point: SimulationStatisticsPoint) => point.retailStock, formatter: formatInteger },
+  { key: 'factory', label: 'Factory Stock', stroke: '#4d3023', value: (point: SimulationStatisticsPoint) => point.factoryStock, formatter: formatInteger },
+  { key: 'cash', label: 'Business Cash', stroke: '#6b4c2e', value: (point: SimulationStatisticsPoint) => point.businessCash, formatter: formatCurrency },
+  { key: 'pantry', label: 'Pantry Fill', stroke: '#4f7b49', value: (point: SimulationStatisticsPoint) => point.pantryFillPercent, formatter: formatPercent },
+  { key: 'housing', label: 'Housing Use', stroke: '#7b4f92', value: (point: SimulationStatisticsPoint) => point.housingUsagePercent, formatter: formatPercent },
+] as const;
+
+const getStatisticsColumnCount = (width: number) => (width >= 320 ? 2 : 1);
+
+const getStatisticsContentHeight = (panelWidth: number) => {
+  const columns = getStatisticsColumnCount(panelWidth - PANEL_PADDING * 2);
+  const chartRows = Math.ceil(statisticsChartDefinitions.length / columns);
+  return statisticsHeaderCopyHeight + chartRows * statisticsChartHeight + (chartRows - 1) * statisticsChartGap;
+};
+
+const buildStatisticsCharts = (
+  bodyRect: Rect,
+  history: SimulationStatisticsPoint[],
+  offset: number,
+  maxOffset: number,
+): StatisticsChart[] => {
+  const availableWidth = bodyRect.width - (maxOffset > 0 ? statisticsScrollbarWidth + 10 : 0);
+  const columns = getStatisticsColumnCount(availableWidth);
+  const cardWidth = Math.floor((availableWidth - statisticsChartGap * (columns - 1)) / columns);
+  const chartsTop = bodyRect.y - offset + statisticsHeaderCopyHeight;
+
+  return statisticsChartDefinitions.map((definition, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const values = history.map(definition.value);
+    const currentValue = values[values.length - 1] ?? 0;
+    const previousValue = values.length > 1 ? values[values.length - 2] : undefined;
+    const delta = previousValue === undefined ? 0 : currentValue - previousValue;
+
+    return {
+      deltaLabel: getChartDeltaLabel(currentValue, previousValue, definition.formatter),
+      label: definition.label,
+      rect: makeRect(
+        bodyRect.x + column * (cardWidth + statisticsChartGap),
+        chartsTop + row * (statisticsChartHeight + statisticsChartGap),
+        cardWidth,
+        statisticsChartHeight,
+      ),
+      stroke: definition.stroke,
+      trend: delta > 0.05 ? 'up' : delta < -0.05 ? 'down' : 'flat',
+      valueLabel: definition.formatter(currentValue),
+      values,
+    };
+  });
+};
+
 const getOverviewLayout = (bodyRect: Rect, world: WorldState): OverviewLayout => {
   const cardHeight = 74;
   const gap = 12;
@@ -431,6 +598,35 @@ const getToolsContentHeight = () => {
   return height + 8;
 };
 
+const getStatisticsRect = (width: number, height: number, drawers: CanvasDrawerState, toolsRect: Rect) => {
+  const mobile = width <= 720;
+  const tablet = width <= 960;
+  const panelWidth = mobile
+    ? Math.max(280, width - 24)
+    : Math.min(tablet ? PANEL_WIDTH_STATISTICS_TABLET : PANEL_WIDTH_STATISTICS_DESKTOP, width - 32);
+  const desiredContentHeight = Math.min(
+    getStatisticsContentHeight(panelWidth),
+    mobile ? 264 : tablet ? 312 : 396,
+  );
+  const desiredHeight = drawers.statistics
+    ? desiredContentHeight + PANEL_HEADER_HEIGHT + PANEL_PADDING
+    : PANEL_HEADER_HEIGHT;
+  const maxHeight = mobile
+    ? Math.max(PANEL_HEADER_HEIGHT, toolsRect.y - MOBILE_PANEL_STACK_GAP - 12)
+    : tablet
+      ? Math.max(PANEL_HEADER_HEIGHT, toolsRect.y - PANEL_STACK_GAP - 18)
+      : height - 36;
+  const panelHeight = clamp(desiredHeight, PANEL_HEADER_HEIGHT, maxHeight);
+  const x = mobile ? 12 : width - panelWidth - 18;
+  const y = mobile
+    ? Math.max(12, toolsRect.y - panelHeight - MOBILE_PANEL_STACK_GAP)
+    : tablet
+      ? Math.max(18, toolsRect.y - panelHeight - PANEL_STACK_GAP)
+      : height - panelHeight - 18;
+
+  return makeRect(x, y, panelWidth, panelHeight);
+};
+
 const getInspectorContentHeight = (selectedAgentSnapshot: DynamicAgentSnapshot | undefined, world: WorldState, panelWidth: number) => {
   const details = resolveInspectorData(world, selectedAgentSnapshot);
   if (details.kind === 'none') {
@@ -445,8 +641,9 @@ const getInspectorContentHeight = (selectedAgentSnapshot: DynamicAgentSnapshot |
     height: 0,
     overlayMode: 'none',
     paused: false,
-    scrollOffsets: { obituary: 0 },
+    scrollOffsets: { obituary: 0, statistics: 0 },
     selectedAgentSnapshot,
+    statisticsHistory: [],
     width: panelWidth,
     world,
     zoom: 1,
@@ -472,7 +669,7 @@ const getInspectorRect = (
   height: number,
   drawers: CanvasDrawerState,
   state: CanvasUiLayoutState,
-  toolsRect: Rect,
+  statisticsRect: Rect,
 ) => {
   const mobile = width <= 720;
   const tablet = width <= 960;
@@ -482,10 +679,18 @@ const getInspectorRect = (
   const desiredHeight = drawers.inspector
     ? getInspectorContentHeight(state.selectedAgentSnapshot, state.world, panelWidth) + PANEL_HEADER_HEIGHT + PANEL_PADDING
     : PANEL_HEADER_HEIGHT;
-  const maxHeight = mobile ? Math.max(180, Math.floor(height * 0.4)) : tablet ? 420 : height - 36;
+  const maxHeight = mobile
+    ? Math.max(PANEL_HEADER_HEIGHT, statisticsRect.y - MOBILE_PANEL_STACK_GAP - 12)
+    : tablet
+      ? 420
+      : height - 36;
   const panelHeight = clamp(desiredHeight, PANEL_HEADER_HEIGHT, maxHeight);
   const x = mobile ? 12 : tablet ? 18 : width - panelWidth - 18;
-  const y = mobile ? Math.max(12, toolsRect.y - panelHeight - MOBILE_PANEL_STACK_GAP) : tablet ? height - panelHeight - 18 : 18;
+  const y = mobile
+    ? Math.max(12, statisticsRect.y - panelHeight - MOBILE_PANEL_STACK_GAP)
+    : tablet
+      ? height - panelHeight - 18
+      : 18;
   return makeRect(x, y, panelWidth, panelHeight);
 };
 
@@ -686,6 +891,56 @@ const buildObituaryPanel = (
   };
 };
 
+const buildStatisticsPanel = (
+  state: CanvasUiLayoutState,
+  elements: CanvasUiElement[],
+  toolsRect: Rect,
+): { panel: CanvasUiPanel; scrollRegion?: CanvasUiScrollRegion; statisticsCharts: StatisticsChart[] } => {
+  const rect = getStatisticsRect(state.width, state.height, state.drawers, toolsRect);
+  const toggleLabel = `${state.drawers.statistics ? 'Hide' : 'Show'} Statistics`;
+  const toggleRect = getToggleRect(rect, toggleLabel);
+  const summary = state.statisticsHistory.length > 0 ? `${state.statisticsHistory.length} pts` : undefined;
+  const panel: CanvasUiPanel = {
+    bodyRect: state.drawers.statistics
+      ? makeRect(
+          rect.x + PANEL_PADDING,
+          rect.y + PANEL_HEADER_HEIGHT,
+          rect.width - PANEL_PADDING * 2,
+          rect.height - PANEL_HEADER_HEIGHT - PANEL_PADDING,
+        )
+      : undefined,
+    open: state.drawers.statistics,
+    rect,
+    summary,
+    summaryRect: getSummaryRect(rect, toggleRect, summary),
+    title: 'Statistics',
+    toggleRect,
+    toggleElementId: addButton(elements, toggleLabel, toggleRect, {
+      drawer: 'statistics',
+      type: 'toggleDrawer',
+    }).id,
+  };
+
+  if (!state.drawers.statistics || !panel.bodyRect) {
+    return { panel, statisticsCharts: [] };
+  }
+
+  const contentHeight = getStatisticsContentHeight(rect.width);
+  const maxOffset = Math.max(0, contentHeight - panel.bodyRect.height);
+  const offset = clamp(state.scrollOffsets.statistics, 0, maxOffset);
+
+  return {
+    panel,
+    scrollRegion: {
+      id: 'statistics',
+      maxOffset,
+      offset,
+      viewportRect: panel.bodyRect,
+    },
+    statisticsCharts: buildStatisticsCharts(panel.bodyRect, state.statisticsHistory, offset, maxOffset),
+  };
+};
+
 const getInspectorRelationshipSections = (
   inspector: ReturnType<typeof resolveInspectorData>,
 ): InspectorRelationSection[] => {
@@ -780,9 +1035,9 @@ const buildInspectorRows = (state: CanvasUiLayoutState) => {
 const buildInspectorPanel = (
   state: CanvasUiLayoutState,
   elements: CanvasUiElement[],
-  toolsRect: Rect,
+  statisticsRect: Rect,
 ): { inspectorRows: InspectorRow[]; panel: CanvasUiPanel } => {
-  const rect = getInspectorRect(state.width, state.height, state.drawers, state, toolsRect);
+  const rect = getInspectorRect(state.width, state.height, state.drawers, state, statisticsRect);
   const toggleLabel = `${state.drawers.inspector ? 'Hide' : 'Show'} Inspector`;
   const toggleRect = getToggleRect(rect, toggleLabel);
   const panel: CanvasUiPanel = {
@@ -855,7 +1110,12 @@ export const buildCanvasUiModel = (state: CanvasUiLayoutState): CanvasUiModel =>
   const { metricCards, panel: overviewPanel } = buildOverviewPanel(state, elements);
   const toolsPanel = buildToolsPanel(state, elements);
   const overlaysPanel = buildOverlaysPanel(state, elements);
-  const { inspectorRows, panel: inspectorPanel } = buildInspectorPanel(state, elements, toolsPanel.rect);
+  const { panel: statisticsPanel, scrollRegion: statisticsScrollRegion, statisticsCharts } = buildStatisticsPanel(
+    state,
+    elements,
+    toolsPanel.rect,
+  );
+  const { inspectorRows, panel: inspectorPanel } = buildInspectorPanel(state, elements, statisticsPanel.rect);
   const { obituaryRows, panel: obituaryPanel, scrollRegion } = buildObituaryPanel(
     state,
     elements,
@@ -869,8 +1129,11 @@ export const buildCanvasUiModel = (state: CanvasUiLayoutState): CanvasUiModel =>
     inspectorRows,
     metricCards,
     obituaryRows,
-    panels: [overviewPanel, overlaysPanel, obituaryPanel, toolsPanel, inspectorPanel],
-    scrollRegions: scrollRegion ? [scrollRegion] : [],
+    panels: [overviewPanel, overlaysPanel, obituaryPanel, toolsPanel, statisticsPanel, inspectorPanel],
+    scrollRegions: [scrollRegion, statisticsScrollRegion].filter(
+      (region): region is CanvasUiScrollRegion => Boolean(region),
+    ),
+    statisticsCharts,
   };
 };
 
@@ -1085,6 +1348,107 @@ const drawObituaryBody = (
   ctx.fillRect(trackX, thumbY, obituaryScrollbarWidth, thumbHeight);
 };
 
+const drawStatisticsBody = (
+  ctx: CanvasRenderingContext2D,
+  panel: CanvasUiPanel,
+  charts: StatisticsChart[],
+  scrollRegion: CanvasUiScrollRegion | undefined,
+) => {
+  if (!panel.open || !panel.bodyRect) {
+    return;
+  }
+
+  const bodyRect = panel.bodyRect;
+  const compact = panel.rect.width <= 420;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(bodyRect.x, bodyRect.y, bodyRect.width, bodyRect.height);
+  ctx.clip();
+
+  ctx.fillStyle = subduedTextColor;
+  ctx.font = compact ? "500 12px 'Iowan Old Style', Georgia, serif" : "500 14px 'Iowan Old Style', Georgia, serif";
+  ctx.fillText('Historic city telemetry sampled through the run.', bodyRect.x, bodyRect.y + 16);
+  ctx.fillText('Inspector and Statistics share focus, so only one opens at a time.', bodyRect.x, bodyRect.y + 34);
+
+  for (const chart of charts) {
+    if (chart.rect.y + chart.rect.height < bodyRect.y || chart.rect.y > bodyRect.y + bodyRect.height) {
+      continue;
+    }
+
+    ctx.fillStyle = cardFill;
+    ctx.strokeStyle = cardStroke;
+    ctx.lineWidth = 1;
+    ctx.fillRect(chart.rect.x, chart.rect.y, chart.rect.width, chart.rect.height);
+    ctx.strokeRect(chart.rect.x, chart.rect.y, chart.rect.width, chart.rect.height);
+
+    ctx.fillStyle = subduedTextColor;
+    ctx.font = compact ? "600 10px 'Iowan Old Style', Georgia, serif" : "600 11px 'Iowan Old Style', Georgia, serif";
+    ctx.fillText(chart.label, chart.rect.x + 12, chart.rect.y + 18);
+
+    ctx.fillStyle = textColor;
+    ctx.font = compact ? "700 18px 'Iowan Old Style', Georgia, serif" : "700 20px 'Iowan Old Style', Georgia, serif";
+    ctx.fillText(chart.valueLabel, chart.rect.x + 12, chart.rect.y + 42);
+
+    ctx.fillStyle =
+      chart.trend === 'up' ? 'rgba(15, 110, 105, 0.9)' : chart.trend === 'down' ? 'rgba(143, 44, 26, 0.9)' : subduedTextColor;
+    ctx.font = compact ? "600 10px ui-monospace, 'SFMono-Regular', monospace" : "600 11px ui-monospace, 'SFMono-Regular', monospace";
+    ctx.fillText(chart.deltaLabel, chart.rect.x + 12, chart.rect.y + 58);
+
+    const plotRect = makeRect(chart.rect.x + 10, chart.rect.y + 66, chart.rect.width - 20, 22);
+    const barCount = Math.max(8, Math.min(chart.values.length, Math.floor(plotRect.width / 4)));
+    const bucketSize = Math.max(1, Math.ceil(chart.values.length / barCount));
+    const bars: number[] = [];
+
+    for (let index = 0; index < chart.values.length; index += bucketSize) {
+      let total = 0;
+      let count = 0;
+      for (let bucketIndex = index; bucketIndex < Math.min(chart.values.length, index + bucketSize); bucketIndex += 1) {
+        total += chart.values[bucketIndex] ?? 0;
+        count += 1;
+      }
+      bars.push(count > 0 ? total / count : 0);
+    }
+
+    const maxValue = Math.max(...bars, 0);
+    const minValue = Math.min(...bars, 0);
+    const range = Math.max(1, maxValue - minValue);
+    const barWidth = Math.max(2, Math.floor((plotRect.width - Math.max(0, bars.length - 1)) / Math.max(1, bars.length)));
+
+    ctx.fillStyle = 'rgba(106, 92, 79, 0.14)';
+    ctx.fillRect(plotRect.x, plotRect.y + plotRect.height - 1, plotRect.width, 1);
+    ctx.fillStyle = chart.stroke;
+
+    bars.forEach((value, index) => {
+      const height = Math.max(2, Math.round(((value - minValue) / range) * plotRect.height));
+      const x = plotRect.x + index * (barWidth + 1);
+      const y = plotRect.y + plotRect.height - height;
+      ctx.fillRect(x, y, barWidth, height);
+    });
+  }
+
+  ctx.restore();
+
+  if (!scrollRegion || scrollRegion.maxOffset <= 0) {
+    return;
+  }
+
+  const trackX = bodyRect.x + bodyRect.width - statisticsScrollbarWidth;
+  const thumbHeight = Math.max(
+    28,
+    Math.floor((bodyRect.height / (bodyRect.height + scrollRegion.maxOffset)) * bodyRect.height),
+  );
+  const thumbTravel = bodyRect.height - thumbHeight;
+  const thumbY =
+    bodyRect.y +
+    (scrollRegion.maxOffset > 0 ? (scrollRegion.offset / scrollRegion.maxOffset) * thumbTravel : 0);
+
+  ctx.fillStyle = 'rgba(93, 74, 53, 0.12)';
+  ctx.fillRect(trackX, bodyRect.y, statisticsScrollbarWidth, bodyRect.height);
+  ctx.fillStyle = 'rgba(93, 74, 53, 0.5)';
+  ctx.fillRect(trackX, thumbY, statisticsScrollbarWidth, thumbHeight);
+};
+
 const drawToolsBody = (ctx: CanvasRenderingContext2D, panel: CanvasUiPanel) => {
   if (!panel.open || !panel.bodyRect) {
     return;
@@ -1194,9 +1558,20 @@ export const renderCanvasUi = (ctx: CanvasRenderingContext2D, state: CanvasUiLay
   }
 
   drawOverviewBody(ctx, model.panels[0]!, model.metricCards);
-  drawObituaryBody(ctx, model.panels[2]!, model.obituaryRows, model.scrollRegions[0]);
+  drawObituaryBody(
+    ctx,
+    model.panels[2]!,
+    model.obituaryRows,
+    model.scrollRegions.find((region) => region.id === 'obituary'),
+  );
   drawToolsBody(ctx, model.panels[3]!);
-  drawInspectorBody(ctx, state, model.panels[4]!, model.inspectorRows);
+  drawStatisticsBody(
+    ctx,
+    model.panels[4]!,
+    model.statisticsCharts,
+    model.scrollRegions.find((region) => region.id === 'statistics'),
+  );
+  drawInspectorBody(ctx, state, model.panels[5]!, model.inspectorRows);
 
   for (const element of model.elements) {
     drawButton(ctx, element);

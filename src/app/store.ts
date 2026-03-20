@@ -3,6 +3,12 @@ import { advanceWorld, stepWorld } from '../sim/stepWorld';
 import { MAX_FRAME_ADVANCE_MS, STARTER_WORLD_SEED, msPerTick } from '../sim/constants';
 import { BuildMode, OverlayMode, Point, WorldState } from '../sim/types';
 import {
+  sampleDynamicStatistics,
+  sampleWorldStatistics,
+  type SimulationStatisticsPoint,
+  updateStatisticsHistory,
+} from './statistics';
+import {
   agentStateOrder,
   CompactAgentFrame,
   DynamicAgentSnapshot,
@@ -17,6 +23,7 @@ import { pointToTile } from '../sim/utils';
 
 type WorldStore = {
   world: WorldState;
+  statisticsHistory: SimulationStatisticsPoint[];
   paused: boolean;
   buildMode: BuildMode;
   overlayMode: OverlayMode;
@@ -48,6 +55,8 @@ let currentRenderSnapshot: WorldDynamicSnapshot | null = null;
 let previousRenderSnapshotReceivedAtMs = 0;
 let currentRenderSnapshotReceivedAtMs = 0;
 let estimatedRenderSnapshotIntervalMs = 0;
+const initialWorld = createStarterWorld();
+const initialStatisticsHistory = updateStatisticsHistory([], sampleWorldStatistics(initialWorld));
 
 const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -193,6 +202,7 @@ const applyWorkerSnapshot = (message: SimulationWorkerOutboundMessage) => {
       ...state,
       carryMs: 0,
       selectedAgentSnapshot: snapshot.selectedAgent,
+      statisticsHistory: updateStatisticsHistory(state.statisticsHistory, sampleWorldStatistics(message.world)),
       world: message.world,
     }));
     return;
@@ -203,6 +213,7 @@ const applyWorkerSnapshot = (message: SimulationWorkerOutboundMessage) => {
     ...state,
     carryMs: 0,
     selectedAgentSnapshot: message.snapshot.selectedAgent,
+    statisticsHistory: updateStatisticsHistory(state.statisticsHistory, sampleDynamicStatistics(message.snapshot)),
     world: applyDynamicSnapshotToWorld(state.world, message.snapshot),
   }));
 };
@@ -250,7 +261,8 @@ export const getRenderInterpolationState = () => ({
 });
 
 export const useWorldStore = create<WorldStore>((set, get) => ({
-  world: createStarterWorld(),
+  world: initialWorld,
+  statisticsHistory: initialStatisticsHistory,
   paused: false,
   buildMode: 'select',
   overlayMode: 'none',
@@ -269,8 +281,10 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
       return;
     }
 
+    const nextWorld = createStarterWorld(seed);
     set({
-      world: createStarterWorld(seed),
+      world: nextWorld,
+      statisticsHistory: updateStatisticsHistory([], sampleWorldStatistics(nextWorld)),
       carryMs: 0,
       paused: false,
       selectedAgentSnapshot: undefined,
@@ -292,8 +306,10 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
       return;
     }
 
+    const nextWorld = createStarterWorld();
     set({
-      world: createStarterWorld(),
+      world: nextWorld,
+      statisticsHistory: updateStatisticsHistory([], sampleWorldStatistics(nextWorld)),
       paused: false,
       carryMs: 0,
       selectedAgentSnapshot: undefined,
@@ -319,9 +335,13 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
       return;
     }
 
-    set((state) => ({
-      world: stepWorld(state.world),
-    }));
+    set((state) => {
+      const world = stepWorld(state.world);
+      return {
+        statisticsHistory: updateStatisticsHistory(state.statisticsHistory, sampleWorldStatistics(world)),
+        world,
+      };
+    });
   },
   advanceElapsed: (elapsedMs) => {
     if (get().paused) {
@@ -341,6 +361,7 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
         maxElapsedMs: MAX_FRAME_ADVANCE_MS,
       });
       return {
+        statisticsHistory: updateStatisticsHistory(state.statisticsHistory, sampleWorldStatistics(advanced.world)),
         world: advanced.world,
         carryMs: advanced.carryMs,
       };
@@ -355,10 +376,14 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
       return;
     }
 
-    set((state) => ({
-      selectedAgentSnapshot: agentId === state.selectedAgentSnapshot?.id ? state.selectedAgentSnapshot : undefined,
-      world: selectWorldAgent(state.world, agentId),
-    }));
+    set((state) => {
+      const world = selectWorldAgent(state.world, agentId);
+      return {
+        selectedAgentSnapshot: agentId === state.selectedAgentSnapshot?.id ? state.selectedAgentSnapshot : undefined,
+        statisticsHistory: updateStatisticsHistory(state.statisticsHistory, sampleWorldStatistics(world)),
+        world,
+      };
+    });
   },
   selectTile: (tile) => {
     if (simulationWorker) {
@@ -369,10 +394,14 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
       return;
     }
 
-    set((state) => ({
-      selectedAgentSnapshot: undefined,
-      world: selectWorldTile(state.world, tile),
-    }));
+    set((state) => {
+      const world = selectWorldTile(state.world, tile);
+      return {
+        selectedAgentSnapshot: undefined,
+        statisticsHistory: updateStatisticsHistory(state.statisticsHistory, sampleWorldStatistics(world)),
+        world,
+      };
+    });
   },
   setBuildMode: (mode) => set({ buildMode: mode }),
   setOverlayMode: (mode) => set({ overlayMode: mode }),
@@ -392,8 +421,10 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
     }
 
     set((state) => {
+      const world = paintWorldTile(state.world, x, y, mode);
       return {
-        world: paintWorldTile(state.world, x, y, mode),
+        statisticsHistory: updateStatisticsHistory(state.statisticsHistory, sampleWorldStatistics(world)),
+        world,
       };
     });
   },

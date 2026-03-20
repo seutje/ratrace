@@ -1,10 +1,12 @@
 # RatRace
 
-RatRace is a city simulation with a deterministic fixed-step engine, a canvas world renderer, and HUD with inspector panels.
+RatRace is a city simulation with a deterministic fixed-step engine, a canvas world renderer, and HUD drawers for inspection, controls, and historical statistics.
 
 On desktop, drag the canvas to pan and use the mouse wheel to zoom. On touch devices, drag with one finger to pan and use a two-finger pinch on the canvas to zoom. The mobile layout starts more zoomed-in, keeps secondary drawers collapsed by default, and opens the inspector drawer when you select an agent or zoned tile.
 
 In `Select` mode, clicking an agent opens the inspector for that agent, and clicking a residential, commercial, or industrial tile opens the inspector for that tile. Zoned-tile inspection includes the tile coordinates, zoning type, building record, economic values, pantry values, assignment counts, and any linked residents or workers. Agent relationship links keep a deceased agent's recorded name after death instead of falling back to the raw `agent-####` id.
+
+The bottom-right `Statistics` drawer shows a rolling historic telemetry view of the city, including graphs for population, births, deaths, average happiness, average hunger, average energy, treasury, total wealth, supply stock, traffic, inventory, and housing pressure. The `Inspector` and `Statistics` drawers are mutually exclusive, so opening one closes the other.
 
 ## Setup
 
@@ -58,7 +60,7 @@ Every tick runs the same ordered simulation pass in `stepWorldInPlace()`:
 5. At midnight, run population turnover, household consolidation, and household growth.
 6. Recalculate economy totals such as total wealth and global supply stock.
 
-The worker publishes either full snapshots or compact dynamic snapshots back to the UI, so rendering stays decoupled from the simulation state updates. The renderer interpolates only across compatible snapshots and resets interpolation on full snapshots, which prevents the follow camera from blending against stale agent indices after structural population changes.
+The worker publishes either full snapshots or compact dynamic snapshots back to the UI, so rendering stays decoupled from the simulation state updates. The renderer interpolates only across compatible snapshots and resets interpolation on full snapshots, which prevents the follow camera from blending against stale agent indices after structural population changes. The UI also keeps a capped rolling statistics history sampled from those snapshots so the `Statistics` drawer can graph the city's recent trajectory without storing an unbounded trace.
 
 ### Agents, needs, and daily routine
 
@@ -160,6 +162,6 @@ The build tools modify tiles directly in `paintWorldTile()`.
 ## Architecture
 
 - `src/sim` contains the deterministic simulation core, world generation, routing, economy, congestion, and lifecycle logic.
-- `src/render` contains the canvas renderer, the animation loop hook, and the in-canvas drawer HUD including the `Obituary` log.
-- `src/ui` contains React HUD, controls, build tools, and the agent inspector.
-- `src/app` contains the Zustand store and the application shell.
+- `src/render` contains the canvas renderer, the animation loop hook, and the in-canvas drawer HUD including the `Obituary`, `Inspector`, and `Statistics` panels.
+- `src/ui` contains React HUD, controls, build tools, and inspector data helpers.
+- `src/app` contains the Zustand store, the application shell, and the rolling statistics-history sampler used by the `Statistics` drawer.

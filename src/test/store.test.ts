@@ -1,4 +1,5 @@
 import { advanceRenderSnapshotState } from '../app/store';
+import { sampleWorldStatistics, updateStatisticsHistory } from '../app/statistics';
 import { getAgentRenderPosition } from '../app/camera';
 import { WorldDynamicSnapshot } from '../sim/simulationWorkerTypes';
 import { WorldState } from '../sim/types';
@@ -112,5 +113,47 @@ describe('render snapshot interpolation', () => {
     ).toEqual({ x: 60, y: 60 });
     expect(resetInterpolationState.previous).toBe(currentSnapshot);
     expect(resetInterpolationState.current).toBe(currentSnapshot);
+  });
+
+  it('records cumulative births and deaths in the statistics history buffer', () => {
+    const firstWorld = createStarterWorld();
+    const firstHistory = updateStatisticsHistory([], sampleWorldStatistics(firstWorld));
+
+    const secondWorld = structuredClone(firstWorld);
+    secondWorld.tick += 60;
+    secondWorld.minutesOfDay += 60;
+    secondWorld.entities.agents = secondWorld.entities.agents.slice(0, secondWorld.entities.agents.length - 2);
+    secondWorld.obituary = [
+      {
+        agentId: 'dead-1',
+        agentName: 'Dead One',
+        age: 80,
+        cause: 'old_age',
+        day: secondWorld.day,
+      },
+      {
+        agentId: 'dead-2',
+        agentName: 'Dead Two',
+        age: 81,
+        cause: 'starvation',
+        day: secondWorld.day,
+      },
+    ];
+    const secondHistory = updateStatisticsHistory(firstHistory, sampleWorldStatistics(secondWorld));
+
+    expect(secondHistory.at(-1)?.cumulativeDeaths).toBe(2);
+    expect(secondHistory.at(-1)?.cumulativeBirths).toBe(0);
+
+    const thirdWorld = structuredClone(secondWorld);
+    thirdWorld.tick += 60;
+    thirdWorld.minutesOfDay += 60;
+    thirdWorld.entities.agents.push(structuredClone(firstWorld.entities.agents[0]!));
+    thirdWorld.entities.agents.at(-1)!.id = 'agent-new-1';
+    thirdWorld.entities.agents.push(structuredClone(firstWorld.entities.agents[1]!));
+    thirdWorld.entities.agents.at(-1)!.id = 'agent-new-2';
+    const thirdHistory = updateStatisticsHistory(secondHistory, sampleWorldStatistics(thirdWorld));
+
+    expect(thirdHistory.at(-1)?.cumulativeDeaths).toBe(2);
+    expect(thirdHistory.at(-1)?.cumulativeBirths).toBe(2);
   });
 });

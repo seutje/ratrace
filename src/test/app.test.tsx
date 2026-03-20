@@ -4,6 +4,7 @@ import {
   buildCanvasUiModel,
   defaultCanvasDrawerState,
   getDefaultCanvasDrawerState,
+  toggleCanvasDrawerState,
   type CanvasDrawerState,
   type CanvasScrollState,
   type CanvasUiAction,
@@ -41,7 +42,7 @@ const WORLD_POINT = {
 const createLocalCanvasUiState = (): LocalCanvasUiState => ({
   drawers: { ...defaultCanvasDrawerState },
   followActive: false,
-  scrollOffsets: { obituary: 0 },
+  scrollOffsets: { obituary: 0, statistics: 0 },
   zoom: DEFAULT_ZOOM,
 });
 
@@ -56,6 +57,7 @@ const getCanvasUiState = (localState: LocalCanvasUiState) => {
     paused: store.paused,
     scrollOffsets: localState.scrollOffsets,
     selectedAgentSnapshot: store.selectedAgentSnapshot,
+    statisticsHistory: store.statisticsHistory,
     width: 960,
     world: store.world,
     zoom: localState.zoom,
@@ -67,10 +69,7 @@ const applyLocalAction = (localState: LocalCanvasUiState, action: CanvasUiAction
     case 'toggleDrawer':
       return {
         ...localState,
-        drawers: {
-          ...localState.drawers,
-          [action.drawer]: !localState.drawers[action.drawer],
-        },
+        drawers: toggleCanvasDrawerState(localState.drawers, action.drawer, false),
       };
     case 'toggleFollow':
       return {
@@ -127,7 +126,14 @@ describe('App', () => {
     expect(canvas).toBeInTheDocument();
 
     const model = buildCanvasUiModel(getCanvasUiState(createLocalCanvasUiState()));
-    expect(model.panels.map((panel) => panel.title)).toEqual(['Overview', 'Overlays', 'Obituary', 'Tools', 'Inspector']);
+    expect(model.panels.map((panel) => panel.title)).toEqual([
+      'Overview',
+      'Overlays',
+      'Obituary',
+      'Tools',
+      'Statistics',
+      'Inspector',
+    ]);
     expect(model.metricCards.map((card) => card.label)).toEqual(['World Time', 'Population', 'Treasury']);
     expect(model.elements.some((entry) => entry.label === 'Show Tools')).toBe(true);
     expect(model.elements.find((entry) => entry.label === 'Show Overlays')?.rect.width).toBeGreaterThanOrEqual(120);
@@ -263,17 +269,35 @@ describe('App', () => {
       height: 844,
       overlayMode: 'none',
       paused: false,
-      scrollOffsets: { obituary: 0 },
+      scrollOffsets: { obituary: 0, statistics: 0 },
       selectedAgentSnapshot: undefined,
+      statisticsHistory: useWorldStore.getState().statisticsHistory,
       width: 390,
       world: useWorldStore.getState().world,
       zoom: DEFAULT_ZOOM,
     });
-    const [overviewPanel, overlaysPanel, obituaryPanel, toolsPanel, inspectorPanel] = mobileModel.panels;
+    const [overviewPanel, overlaysPanel, obituaryPanel, toolsPanel, statisticsPanel, inspectorPanel] =
+      mobileModel.panels;
 
     expect(overlaysPanel!.rect.y).toBeGreaterThanOrEqual(overviewPanel!.rect.y + overviewPanel!.rect.height);
     expect(obituaryPanel!.rect.y).toBeGreaterThanOrEqual(overlaysPanel!.rect.y + overlaysPanel!.rect.height);
-    expect(inspectorPanel!.rect.y + inspectorPanel!.rect.height).toBeLessThanOrEqual(toolsPanel!.rect.y);
+    expect(inspectorPanel!.rect.y + inspectorPanel!.rect.height).toBeLessThanOrEqual(statisticsPanel!.rect.y);
+    expect(statisticsPanel!.rect.y + statisticsPanel!.rect.height).toBeLessThanOrEqual(toolsPanel!.rect.y);
+  });
+
+  it('builds a statistics drawer with historic graphs and keeps it exclusive with the inspector', () => {
+    let localState = createLocalCanvasUiState();
+    localState = applyLocalAction(localState, { drawer: 'statistics', type: 'toggleDrawer' });
+
+    expect(localState.drawers.statistics).toBe(true);
+    expect(localState.drawers.inspector).toBe(false);
+
+    const model = buildCanvasUiModel(getCanvasUiState(localState));
+
+    expect(model.statisticsCharts.length).toBeGreaterThanOrEqual(12);
+    expect(model.statisticsCharts.map((chart) => chart.label)).toEqual(
+      expect.arrayContaining(['Population', 'Births', 'Deaths', 'Avg Happiness', 'Treasury', 'Pantry Fill']),
+    );
   });
 
   it('activates follow mode from the canvas inspector and deactivates it when the map is dragged', async () => {
@@ -356,7 +380,7 @@ describe('App', () => {
     expect(labels).toContain('Kid Beta');
     expect(labels).toContain('Parent One');
     expect(labels).toContain('Parent Two');
-    expect(model.panels[4]!.rect.height).toBeGreaterThanOrEqual(420);
+    expect(model.panels[5]!.rect.height).toBeGreaterThanOrEqual(420);
     for (let index = 1; index < relationshipButtons.length; index += 1) {
       expect(relationshipButtons[index]!.rect.y).toBeGreaterThanOrEqual(
         relationshipButtons[index - 1]!.rect.y + relationshipButtons[index - 1]!.rect.height,
@@ -429,7 +453,7 @@ describe('App', () => {
     });
 
     const model = buildCanvasUiModel(getCanvasUiState(createLocalCanvasUiState()));
-    const inspectorPanel = model.panels[4]!;
+    const inspectorPanel = model.panels[5]!;
     const parentButtons = model.elements
       .filter((entry) => ['Parent One', 'Parent Two'].includes(entry.label))
       .sort((left, right) => left.rect.y - right.rect.y)

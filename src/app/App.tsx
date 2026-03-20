@@ -14,7 +14,9 @@ import {
   findCanvasUiElementAtPoint,
   getDefaultCanvasDrawerState,
   isCanvasUiPoint,
+  revealInspectorDrawer,
   renderCanvasUi,
+  toggleCanvasDrawerState,
   type CanvasDrawerState,
   type CanvasScrollState,
   type CanvasUiAction,
@@ -111,7 +113,7 @@ export const App = () => {
   const buildModeRef = useRef<BuildMode>('select');
   const overlayModeRef = useRef<OverlayMode>('none');
   const drawerStateRef = useRef<CanvasDrawerState>(getDefaultCanvasDrawerState(0));
-  const scrollStateRef = useRef<CanvasScrollState>({ obituary: 0 });
+  const scrollStateRef = useRef<CanvasScrollState>({ obituary: 0, statistics: 0 });
   const cameraPresetAppliedRef = useRef(false);
   const cameraTouchedRef = useRef(false);
   const drawerPresetAppliedRef = useRef(false);
@@ -121,7 +123,7 @@ export const App = () => {
   const [pan, setPan] = useState<PanOffset>({ x: 0, y: 0 });
   const [followAgent, setFollowAgent] = useState(false);
   const [drawerState, setDrawerState] = useState<CanvasDrawerState>(getDefaultCanvasDrawerState(0));
-  const [scrollState, setScrollState] = useState<CanvasScrollState>({ obituary: 0 });
+  const [scrollState, setScrollState] = useState<CanvasScrollState>({ obituary: 0, statistics: 0 });
   const mobileLayout = size.width <= MOBILE_LAYOUT_BREAKPOINT;
 
   const worldWidth = useWorldStore((state) => state.world.width);
@@ -132,6 +134,7 @@ export const App = () => {
   const buildMode = useWorldStore((state) => state.buildMode);
   const overlayMode = useWorldStore((state) => state.overlayMode);
   const advanceElapsed = useWorldStore((state) => state.advanceElapsed);
+  const statisticsHistory = useWorldStore((state) => state.statisticsHistory);
   const setPaused = useWorldStore((state) => state.setPaused);
   const singleStep = useWorldStore((state) => state.singleStep);
   const reset = useWorldStore((state) => state.reset);
@@ -227,7 +230,10 @@ export const App = () => {
 
   useEffect(() => {
     if (obituaryCount === 0 && scrollStateRef.current.obituary !== 0) {
-      setScrollState({ obituary: 0 });
+      setScrollState((current) => ({
+        ...current,
+        obituary: 0,
+      }));
     }
   }, [obituaryCount]);
 
@@ -340,6 +346,7 @@ export const App = () => {
         paused: pausedRef.current,
         scrollOffsets: scrollStateRef.current,
         selectedAgentSnapshot: useWorldStore.getState().selectedAgentSnapshot,
+        statisticsHistory,
         width: size.width,
         world,
         zoom: zoomRef.current,
@@ -354,7 +361,7 @@ export const App = () => {
     frame = requestAnimationFrame(renderFrame);
 
     return () => cancelAnimationFrame(frame);
-  }, [size, viewport]);
+  }, [size, statisticsHistory, viewport]);
 
   const getCanvasPoint = (
     event: PointerEvent<HTMLCanvasElement> | WheelEvent<HTMLCanvasElement>,
@@ -370,41 +377,13 @@ export const App = () => {
     cameraTouchedRef.current = true;
   };
 
-  const setSecondaryDrawerState = (drawer: Exclude<keyof CanvasDrawerState, 'overview'>) => {
-    drawerTouchedRef.current = true;
-    setDrawerState((current) => {
-      const nextOpen = !current[drawer];
-      if (!mobileLayout || !nextOpen) {
-        return {
-          ...current,
-          [drawer]: nextOpen,
-        };
-      }
-
-      return {
-        ...current,
-        inspector: false,
-        obituary: false,
-        overlays: false,
-        tools: false,
-        [drawer]: true,
-      };
-    });
-  };
-
   const ensureMobileInspectorOpen = () => {
     if (!mobileLayout) {
       return;
     }
 
     drawerTouchedRef.current = true;
-    setDrawerState((current) => ({
-      ...current,
-      inspector: true,
-      obituary: false,
-      overlays: false,
-      tools: false,
-    }));
+    setDrawerState((current) => revealInspectorDrawer(current, true));
   };
 
   const zoomToCanvasPoint = (nextZoom: number, point: CanvasPoint, worldPoint?: CanvasPoint) => {
@@ -486,6 +465,7 @@ export const App = () => {
       paused: pausedRef.current,
       scrollOffsets: scrollStateRef.current,
       selectedAgentSnapshot: useWorldStore.getState().selectedAgentSnapshot,
+      statisticsHistory,
       width: size.width,
       world: useWorldStore.getState().world,
       zoom: zoomRef.current,
@@ -494,15 +474,8 @@ export const App = () => {
   const handleCanvasUiAction = (action: CanvasUiAction) => {
     switch (action.type) {
       case 'toggleDrawer':
-        if (action.drawer === 'overview') {
-          drawerTouchedRef.current = true;
-          setDrawerState((current) => ({
-            ...current,
-            overview: !current.overview,
-          }));
-        } else {
-          setSecondaryDrawerState(action.drawer);
-        }
+        drawerTouchedRef.current = true;
+        setDrawerState((current) => toggleCanvasDrawerState(current, action.drawer, mobileLayout));
         break;
       case 'togglePause':
         setPaused(!pausedRef.current);
