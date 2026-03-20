@@ -54,7 +54,7 @@ Every tick runs the same ordered simulation pass in `stepWorldInPlace()`:
 5. At midnight, run population turnover and household growth.
 6. Recalculate economy totals such as total wealth and global supply stock.
 
-The worker publishes either full snapshots or compact dynamic snapshots back to the UI, so rendering stays decoupled from the simulation state updates.
+The worker publishes either full snapshots or compact dynamic snapshots back to the UI, so rendering stays decoupled from the simulation state updates. The renderer interpolates only across compatible snapshots and resets interpolation on full snapshots, which prevents the follow camera from blending against stale agent indices after structural population changes.
 
 ### Agents, needs, and daily routine
 

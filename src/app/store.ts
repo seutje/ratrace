@@ -33,6 +33,14 @@ type WorldStore = {
   paintTile: (x: number, y: number, type: BuildMode) => void;
 };
 
+type RenderSnapshotState = {
+  current: WorldDynamicSnapshot | null;
+  currentReceivedAtMs: number;
+  estimatedIntervalMs: number;
+  previous: WorldDynamicSnapshot | null;
+  previousReceivedAtMs: number;
+};
+
 let simulationWorker: Worker | null = null;
 let previousRenderSnapshot: WorldDynamicSnapshot | null = null;
 let currentRenderSnapshot: WorldDynamicSnapshot | null = null;
@@ -99,24 +107,57 @@ const toDynamicSnapshot = (world: WorldState): WorldDynamicSnapshot => ({
   traffic: { ...world.traffic },
 });
 
-const setRenderSnapshots = (nextSnapshot: WorldDynamicSnapshot) => {
-  previousRenderSnapshotReceivedAtMs = currentRenderSnapshotReceivedAtMs;
-  previousRenderSnapshot = currentRenderSnapshot ?? nextSnapshot;
-  currentRenderSnapshot = nextSnapshot;
-  currentRenderSnapshotReceivedAtMs = nowMs();
+export const advanceRenderSnapshotState = (
+  state: RenderSnapshotState,
+  nextSnapshot: WorldDynamicSnapshot,
+  options: {
+    receivedAtMs?: number;
+    resetInterpolation?: boolean;
+  } = {},
+): RenderSnapshotState => {
+  const receivedAtMs = options.receivedAtMs ?? nowMs();
+  const resetInterpolation = options.resetInterpolation ?? false;
+  const previous = resetInterpolation ? nextSnapshot : state.current ?? nextSnapshot;
+  const previousReceivedAtMs = resetInterpolation ? receivedAtMs : state.currentReceivedAtMs;
+  const current = nextSnapshot;
+  const currentReceivedAtMs = receivedAtMs;
 
-  const snapshotTickDelta = Math.max(1, currentRenderSnapshot.tick - previousRenderSnapshot.tick);
+  const snapshotTickDelta = Math.max(1, current.tick - previous.tick);
   const tickIntervalMs = snapshotTickDelta * msPerTick;
   const arrivalIntervalMs =
-    previousRenderSnapshotReceivedAtMs > 0
-      ? currentRenderSnapshotReceivedAtMs - previousRenderSnapshotReceivedAtMs
+    previousReceivedAtMs > 0
+      ? currentReceivedAtMs - previousReceivedAtMs
       : tickIntervalMs;
   const nextEstimateMs = Math.max(tickIntervalMs, arrivalIntervalMs);
 
-  estimatedRenderSnapshotIntervalMs =
-    estimatedRenderSnapshotIntervalMs > 0
-      ? estimatedRenderSnapshotIntervalMs * 0.7 + nextEstimateMs * 0.3
-      : nextEstimateMs;
+  return {
+    current,
+    currentReceivedAtMs,
+    estimatedIntervalMs:
+      state.estimatedIntervalMs > 0 ? state.estimatedIntervalMs * 0.7 + nextEstimateMs * 0.3 : nextEstimateMs,
+    previous,
+    previousReceivedAtMs,
+  };
+};
+
+const setRenderSnapshots = (nextSnapshot: WorldDynamicSnapshot, options?: { resetInterpolation?: boolean }) => {
+  const nextState = advanceRenderSnapshotState(
+    {
+      current: currentRenderSnapshot,
+      currentReceivedAtMs: currentRenderSnapshotReceivedAtMs,
+      estimatedIntervalMs: estimatedRenderSnapshotIntervalMs,
+      previous: previousRenderSnapshot,
+      previousReceivedAtMs: previousRenderSnapshotReceivedAtMs,
+    },
+    nextSnapshot,
+    options,
+  );
+
+  currentRenderSnapshot = nextState.current;
+  currentRenderSnapshotReceivedAtMs = nextState.currentReceivedAtMs;
+  estimatedRenderSnapshotIntervalMs = nextState.estimatedIntervalMs;
+  previousRenderSnapshot = nextState.previous;
+  previousRenderSnapshotReceivedAtMs = nextState.previousReceivedAtMs;
 };
 
 const applyDynamicSnapshotToWorld = (world: WorldState, snapshot: WorldDynamicSnapshot): WorldState => {
@@ -142,7 +183,7 @@ const applyDynamicSnapshotToWorld = (world: WorldState, snapshot: WorldDynamicSn
 const applyWorkerSnapshot = (message: SimulationWorkerOutboundMessage) => {
   if (message.type === 'fullSnapshot') {
     const snapshot = toDynamicSnapshot(message.world);
-    setRenderSnapshots(snapshot);
+    setRenderSnapshots(snapshot, { resetInterpolation: true });
     useWorldStore.setState((state) => ({
       ...state,
       carryMs: 0,
