@@ -4,6 +4,7 @@ import {
   Building,
   BuildMode,
   Economy,
+  ObituaryEntry,
   TrafficMap,
   WorldMetrics,
   WorldState,
@@ -80,6 +81,7 @@ export type WorldDynamicSnapshot = {
   frame: CompactAgentFrame;
   metrics: WorldMetrics;
   minutesOfDay: number;
+  obituary: ObituaryEntry[];
   selectedAgent?: DynamicAgentSnapshot;
   selectedAgentId?: string;
   tick: number;

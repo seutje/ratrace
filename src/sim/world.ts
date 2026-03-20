@@ -418,6 +418,7 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED, population = START
       buildings,
     },
     selectedAgentId: undefined,
+    obituary: [],
     traffic: {},
     metrics: {
       mapVersion: 1,
@@ -446,6 +447,7 @@ export const createBlankWorld = (width: number, height: number): WorldState => (
     agents: [],
     buildings: [],
   },
+  obituary: [],
   traffic: {},
   metrics: {
     mapVersion: 1,

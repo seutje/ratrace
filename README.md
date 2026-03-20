@@ -131,6 +131,7 @@ At midnight the simulation performs long-horizon lifecycle updates.
 - Agents track whether they spent the day at maximum hunger.
 - Repeated full-hunger days increase hardship memory.
 - Agents that remain at maximum hunger for too many consecutive days are removed from the city.
+- Every death is recorded in the left-side `Obituary` drawer, including the cause, day, and age at death.
 - If housing capacity is available, a residential household can add one new resident per day when:
   - two qualifying residents of opposite sexes live in the home
   - they each have at least `$100` and spend it when the household grows
@@ -152,6 +153,6 @@ The build tools modify tiles directly in `paintWorldTile()`.
 ## Architecture
 
 - `src/sim` contains the deterministic simulation core, world generation, routing, economy, congestion, and lifecycle logic.
-- `src/render` contains the canvas renderer and the animation loop hook.
+- `src/render` contains the canvas renderer, the animation loop hook, and the in-canvas drawer HUD including the `Obituary` log.
 - `src/ui` contains React HUD, controls, build tools, and the agent inspector.
 - `src/app` contains the Zustand store and the application shell.

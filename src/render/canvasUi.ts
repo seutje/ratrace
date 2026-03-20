@@ -1,5 +1,5 @@
 import { DynamicAgentSnapshot } from '../sim/simulationWorkerTypes';
-import { BuildMode, OverlayMode, TileType, WorldState } from '../sim/types';
+import { BuildMode, ObituaryCause, OverlayMode, TileType, WorldState } from '../sim/types';
 import { formatClock } from '../sim/utils';
 import {
   inspectorSexLabels,
@@ -21,9 +21,13 @@ export type CanvasUiPoint = {
   y: number;
 };
 
-export type CanvasDrawerId = 'inspector' | 'overview' | 'overlays' | 'tools';
+export type CanvasDrawerId = 'inspector' | 'obituary' | 'overview' | 'overlays' | 'tools';
 
 export type CanvasDrawerState = Record<CanvasDrawerId, boolean>;
+
+export type CanvasScrollRegionId = 'obituary';
+
+export type CanvasScrollState = Record<CanvasScrollRegionId, number>;
 
 export type CanvasUiAction =
   | { drawer: CanvasDrawerId; type: 'toggleDrawer' }
@@ -81,11 +85,27 @@ type InspectorRelationSection = {
   label: string;
 };
 
+type ObituaryRow = {
+  cause: ObituaryCause;
+  detail: string;
+  name: string;
+  rect: Rect;
+};
+
+export type CanvasUiScrollRegion = {
+  id: CanvasScrollRegionId;
+  maxOffset: number;
+  offset: number;
+  viewportRect: Rect;
+};
+
 export type CanvasUiModel = {
   elements: CanvasUiElement[];
   inspectorRows: InspectorRow[];
   metricCards: MetricCard[];
+  obituaryRows: ObituaryRow[];
   panels: CanvasUiPanel[];
+  scrollRegions: CanvasUiScrollRegion[];
 };
 
 export type CanvasUiLayoutState = {
@@ -95,6 +115,7 @@ export type CanvasUiLayoutState = {
   height: number;
   overlayMode: OverlayMode;
   paused: boolean;
+  scrollOffsets: CanvasScrollState;
   selectedAgentSnapshot?: DynamicAgentSnapshot;
   width: number;
   world: WorldState;
@@ -108,13 +129,22 @@ const PANEL_WIDTH_OVERVIEW_DESKTOP = 672;
 const PANEL_WIDTH_OVERVIEW_TABLET = 552;
 const PANEL_WIDTH_OVERLAYS_DESKTOP = 300;
 const PANEL_WIDTH_OVERLAYS_TABLET = 320;
+const PANEL_WIDTH_OBITUARY_DESKTOP = PANEL_WIDTH_OVERLAYS_DESKTOP;
+const PANEL_WIDTH_OBITUARY_TABLET = PANEL_WIDTH_OVERLAYS_TABLET;
 const PANEL_WIDTH_TOOLS_DESKTOP = 360;
 const PANEL_WIDTH_TOOLS_TABLET = 420;
 const PANEL_WIDTH_INSPECTOR_DESKTOP = 360;
 const PANEL_WIDTH_INSPECTOR_TABLET = 320;
+const PANEL_STACK_GAP = 18;
+const MOBILE_PANEL_STACK_GAP = 12;
+const obituaryEmptyHeight = 74;
+const obituaryRowHeight = 58;
+const obituaryRowGap = 8;
+const obituaryScrollbarWidth = 8;
 
 export const defaultCanvasDrawerState: CanvasDrawerState = {
   inspector: true,
+  obituary: true,
   overview: true,
   overlays: false,
   tools: false,
@@ -244,6 +274,16 @@ const getInspectorRelationshipSectionHeight = (entryCount: number) => {
   return Math.max(inspectorLineHeight, stackHeight) + inspectorRowGap;
 };
 
+const getObituaryContentHeight = (entryCount: number) => {
+  if (entryCount === 0) {
+    return obituaryEmptyHeight;
+  }
+
+  return entryCount * obituaryRowHeight + (entryCount - 1) * obituaryRowGap;
+};
+
+const getObituaryCauseLabel = (cause: ObituaryCause) => (cause === 'starvation' ? 'Starvation' : 'Old age');
+
 const getOverviewLayout = (bodyRect: Rect, world: WorldState): OverviewLayout => {
   const cardHeight = 74;
   const gap = 12;
@@ -326,6 +366,35 @@ const getOverlaysRect = (width: number, drawers: CanvasDrawerState) => {
   return makeRect(mobile ? 12 : 18, y, panelWidth, heightValue);
 };
 
+const getObituaryRect = (
+  state: CanvasUiLayoutState,
+  overlaysRect: Rect,
+  inspectorRect: Rect,
+  toolsRect: Rect,
+) => {
+  const mobile = state.width <= 720;
+  const tablet = state.width <= 960;
+  const panelWidth = mobile
+    ? Math.max(280, state.width - 24)
+    : Math.min(
+        tablet ? PANEL_WIDTH_OBITUARY_TABLET : PANEL_WIDTH_OBITUARY_DESKTOP,
+        state.width - 36,
+      );
+  const y = overlaysRect.y + overlaysRect.height + (mobile ? MOBILE_PANEL_STACK_GAP : PANEL_STACK_GAP);
+  const boundaryY = tablet ? inspectorRect.y : toolsRect.y;
+  const maxHeight = Math.max(PANEL_HEADER_HEIGHT, boundaryY - y - (mobile ? MOBILE_PANEL_STACK_GAP : PANEL_STACK_GAP));
+  const desiredContentHeight =
+    tablet
+      ? Math.min(getObituaryContentHeight(state.world.obituary.length), 220)
+      : Math.min(getObituaryContentHeight(state.world.obituary.length), 300);
+  const desiredHeight = state.drawers.obituary
+    ? desiredContentHeight + PANEL_HEADER_HEIGHT + PANEL_PADDING
+    : PANEL_HEADER_HEIGHT;
+  const panelHeight = clamp(desiredHeight, PANEL_HEADER_HEIGHT, maxHeight);
+
+  return makeRect(overlaysRect.x, y, panelWidth, panelHeight);
+};
+
 const getToolsRect = (width: number, height: number, drawers: CanvasDrawerState) => {
   const mobile = width <= 720;
   const tablet = width <= 960;
@@ -361,6 +430,7 @@ const getInspectorContentHeight = (selectedAgentSnapshot: DynamicAgentSnapshot |
     height: 0,
     overlayMode: 'none',
     paused: false,
+    scrollOffsets: { obituary: 0 },
     selectedAgentSnapshot,
     width: panelWidth,
     world,
@@ -540,6 +610,66 @@ const buildOverlaysPanel = (state: CanvasUiLayoutState, elements: CanvasUiElemen
   return panel;
 };
 
+const buildObituaryPanel = (
+  state: CanvasUiLayoutState,
+  elements: CanvasUiElement[],
+  overlaysRect: Rect,
+  inspectorRect: Rect,
+  toolsRect: Rect,
+): { obituaryRows: ObituaryRow[]; panel: CanvasUiPanel; scrollRegion?: CanvasUiScrollRegion } => {
+  const rect = getObituaryRect(state, overlaysRect, inspectorRect, toolsRect);
+  const toggleLabel = `${state.drawers.obituary ? 'Hide' : 'Show'} Obituary`;
+  const toggleRect = getToggleRect(rect, toggleLabel);
+  const panel: CanvasUiPanel = {
+    bodyRect: state.drawers.obituary
+      ? makeRect(
+          rect.x + PANEL_PADDING,
+          rect.y + PANEL_HEADER_HEIGHT,
+          rect.width - PANEL_PADDING * 2,
+          rect.height - PANEL_HEADER_HEIGHT - PANEL_PADDING,
+        )
+      : undefined,
+    open: state.drawers.obituary,
+    rect,
+    title: 'Obituary',
+    toggleRect,
+    toggleElementId: addButton(elements, toggleLabel, toggleRect, {
+      drawer: 'obituary',
+      type: 'toggleDrawer',
+    }).id,
+  };
+
+  if (!state.drawers.obituary || !panel.bodyRect) {
+    return { obituaryRows: [], panel };
+  }
+
+  const contentHeight = getObituaryContentHeight(state.world.obituary.length);
+  const maxOffset = Math.max(0, contentHeight - panel.bodyRect.height);
+  const offset = clamp(state.scrollOffsets.obituary, 0, maxOffset);
+  const rows = state.world.obituary.map((entry, index) => ({
+    cause: entry.cause,
+    detail: `${getObituaryCauseLabel(entry.cause)} | day ${entry.day} | age ${entry.age}`,
+    name: entry.agentName,
+    rect: makeRect(
+      panel.bodyRect!.x,
+      panel.bodyRect!.y - offset + index * (obituaryRowHeight + obituaryRowGap),
+      panel.bodyRect!.width - (maxOffset > 0 ? obituaryScrollbarWidth + 10 : 0),
+      obituaryRowHeight,
+    ),
+  }));
+
+  return {
+    obituaryRows: rows,
+    panel,
+    scrollRegion: {
+      id: 'obituary',
+      maxOffset,
+      offset,
+      viewportRect: panel.bodyRect,
+    },
+  };
+};
+
 const buildInspectorRows = (state: CanvasUiLayoutState) => {
   const inspector = resolveInspectorData(state.world, state.selectedAgentSnapshot);
   if (!inspector.agent) {
@@ -664,12 +794,21 @@ export const buildCanvasUiModel = (state: CanvasUiLayoutState): CanvasUiModel =>
   const overlaysPanel = buildOverlaysPanel(state, elements);
   const toolsPanel = buildToolsPanel(state, elements);
   const { inspectorRows, panel: inspectorPanel } = buildInspectorPanel(state, elements);
+  const { obituaryRows, panel: obituaryPanel, scrollRegion } = buildObituaryPanel(
+    state,
+    elements,
+    overlaysPanel.rect,
+    inspectorPanel.rect,
+    toolsPanel.rect,
+  );
 
   return {
     elements,
     inspectorRows,
     metricCards,
-    panels: [overviewPanel, overlaysPanel, toolsPanel, inspectorPanel],
+    obituaryRows,
+    panels: [overviewPanel, overlaysPanel, obituaryPanel, toolsPanel, inspectorPanel],
+    scrollRegions: scrollRegion ? [scrollRegion] : [],
   };
 };
 
@@ -683,6 +822,9 @@ export const findCanvasUiElementAtPoint = (model: CanvasUiModel, point: CanvasUi
 
   return undefined;
 };
+
+export const findCanvasUiScrollRegionAtPoint = (model: CanvasUiModel, point: CanvasUiPoint) =>
+  model.scrollRegions.find((region) => containsPoint(region.viewportRect, point));
 
 export const isCanvasUiPoint = (model: CanvasUiModel, point: CanvasUiPoint) =>
   model.panels.some((panel) => containsPoint(panel.rect, point));
@@ -800,6 +942,76 @@ const drawOverviewBody = (ctx: CanvasRenderingContext2D, panel: CanvasUiPanel, c
   drawMetricCards(ctx, cards);
 };
 
+const drawObituaryBody = (
+  ctx: CanvasRenderingContext2D,
+  panel: CanvasUiPanel,
+  rows: ObituaryRow[],
+  scrollRegion: CanvasUiScrollRegion | undefined,
+) => {
+  if (!panel.open || !panel.bodyRect) {
+    return;
+  }
+
+  const bodyRect = panel.bodyRect;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(bodyRect.x, bodyRect.y, bodyRect.width, bodyRect.height);
+  ctx.clip();
+
+  if (rows.length === 0) {
+    ctx.fillStyle = subduedTextColor;
+    ctx.font = "500 14px 'Iowan Old Style', Georgia, serif";
+    ctx.fillText('No agents have died in this run yet.', bodyRect.x, bodyRect.y + 22);
+    ctx.fillText('The list will fill in here at midnight.', bodyRect.x, bodyRect.y + 42);
+    ctx.restore();
+    return;
+  }
+
+  for (const row of rows) {
+    if (row.rect.y + row.rect.height < bodyRect.y || row.rect.y > bodyRect.y + bodyRect.height) {
+      continue;
+    }
+
+    ctx.fillStyle = row.cause === 'starvation' ? 'rgba(159, 78, 39, 0.12)' : 'rgba(60, 108, 144, 0.12)';
+    ctx.strokeStyle = cardStroke;
+    ctx.lineWidth = 1;
+    ctx.fillRect(row.rect.x, row.rect.y, row.rect.width, row.rect.height);
+    ctx.strokeRect(row.rect.x, row.rect.y, row.rect.width, row.rect.height);
+
+    ctx.fillStyle = row.cause === 'starvation' ? accentFill : selectedFill;
+    ctx.fillRect(row.rect.x, row.rect.y, 6, row.rect.height);
+
+    ctx.fillStyle = textColor;
+    ctx.font = "700 15px 'Iowan Old Style', Georgia, serif";
+    ctx.fillText(row.name, row.rect.x + 14, row.rect.y + 20);
+
+    ctx.fillStyle = subduedTextColor;
+    ctx.font = "600 12px ui-monospace, 'SFMono-Regular', monospace";
+    ctx.fillText(row.detail, row.rect.x + 14, row.rect.y + 40);
+  }
+
+  ctx.restore();
+
+  if (!scrollRegion || scrollRegion.maxOffset <= 0) {
+    return;
+  }
+
+  const trackX = bodyRect.x + bodyRect.width - obituaryScrollbarWidth;
+  const thumbHeight = Math.max(
+    28,
+    Math.floor((bodyRect.height / (bodyRect.height + scrollRegion.maxOffset)) * bodyRect.height),
+  );
+  const thumbTravel = bodyRect.height - thumbHeight;
+  const thumbY =
+    bodyRect.y +
+    (scrollRegion.maxOffset > 0 ? (scrollRegion.offset / scrollRegion.maxOffset) * thumbTravel : 0);
+
+  ctx.fillStyle = 'rgba(93, 74, 53, 0.12)';
+  ctx.fillRect(trackX, bodyRect.y, obituaryScrollbarWidth, bodyRect.height);
+  ctx.fillStyle = 'rgba(93, 74, 53, 0.5)';
+  ctx.fillRect(trackX, thumbY, obituaryScrollbarWidth, thumbHeight);
+};
+
 const drawToolsBody = (ctx: CanvasRenderingContext2D, panel: CanvasUiPanel) => {
   if (!panel.open || !panel.bodyRect) {
     return;
@@ -892,8 +1104,9 @@ export const renderCanvasUi = (ctx: CanvasRenderingContext2D, state: CanvasUiLay
   }
 
   drawOverviewBody(ctx, model.panels[0]!, model.metricCards);
-  drawToolsBody(ctx, model.panels[2]!);
-  drawInspectorBody(ctx, state, model.panels[3]!, model.inspectorRows);
+  drawObituaryBody(ctx, model.panels[2]!, model.obituaryRows, model.scrollRegions[0]);
+  drawToolsBody(ctx, model.panels[3]!);
+  drawInspectorBody(ctx, state, model.panels[4]!, model.inspectorRows);
 
   for (const element of model.elements) {
     drawButton(ctx, element);

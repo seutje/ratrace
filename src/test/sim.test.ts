@@ -1628,6 +1628,7 @@ describe('traffic and lifecycle', () => {
   it('spawns and removes agents without leaving dangling selection', () => {
     let world = createTestStarterWorld();
     world.selectedAgentId = world.entities.agents[0]!.id;
+    const agentName = world.entities.agents[0]!.name;
     world.entities.agents[0]!.stats.hunger = 100;
     world.entities.agents[0]!.maxHungerStreakDays = 1;
     world.entities.agents[0]!.keptMaxHungerToday = true;
@@ -1638,6 +1639,11 @@ describe('traffic and lifecycle', () => {
 
     expect(world.selectedAgentId).toBeUndefined();
     expect(world.entities.agents.every((agent) => Number.isFinite(agent.pos.x) && Number.isFinite(agent.pos.y))).toBe(true);
+    expect(world.obituary[0]).toMatchObject({
+      agentName,
+      cause: 'starvation',
+      day: 2,
+    });
   });
 
   it('does not cull an agent after only one full day at max hunger', () => {
@@ -1687,6 +1693,7 @@ describe('traffic and lifecycle', () => {
       makeTestAgent({ id: 'agent-1', age: MAX_AGENT_AGE - 2 }),
       makeTestAgent({ id: 'agent-2', age: MAX_AGENT_AGE - 1 }),
     ];
+    const removedAgent = world.entities.agents[1]!;
     world.selectedAgentId = 'agent-2';
     world.minutesOfDay = 23 * 60 + 59;
 
@@ -1696,6 +1703,13 @@ describe('traffic and lifecycle', () => {
       { age: MAX_AGENT_AGE - 1, id: 'agent-1' },
     ]);
     expect(world.selectedAgentId).toBeUndefined();
+    expect(world.obituary[0]).toMatchObject({
+      agentId: removedAgent.id,
+      agentName: removedAgent.name,
+      age: MAX_AGENT_AGE,
+      cause: 'old_age',
+      day: 2,
+    });
   });
 
   it('grows a household when two residents can afford it and housing is available', () => {

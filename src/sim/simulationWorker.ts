@@ -81,6 +81,7 @@ const publishDynamicSnapshot = () => {
     frame,
     metrics: { ...world.metrics },
     minutesOfDay: world.minutesOfDay,
+    obituary: world.obituary.map((entry) => ({ ...entry })),
     selectedAgent: selectedAgent ? toDynamicAgentSnapshot(selectedAgent) : undefined,
     selectedAgentId: world.selectedAgentId,
     tick: world.tick,

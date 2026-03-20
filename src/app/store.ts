@@ -96,6 +96,7 @@ const toDynamicSnapshot = (world: WorldState): WorldDynamicSnapshot => ({
   frame: createCompactAgentFrame(world),
   metrics: { ...world.metrics },
   minutesOfDay: world.minutesOfDay,
+  obituary: world.obituary.map((entry) => ({ ...entry })),
   selectedAgent: world.selectedAgentId
     ? (() => {
         const agent = world.entities.agents.find((entry) => entry.id === world.selectedAgentId);
@@ -174,6 +175,7 @@ const applyDynamicSnapshotToWorld = (world: WorldState, snapshot: WorldDynamicSn
     },
     metrics: { ...snapshot.metrics },
     minutesOfDay: snapshot.minutesOfDay,
+    obituary: snapshot.obituary.map((entry) => ({ ...entry })),
     selectedAgentId: snapshot.selectedAgentId,
     tick: snapshot.tick,
     traffic: { ...snapshot.traffic },

@@ -45,6 +45,7 @@ import {
   AgentSex,
   Building,
   BuildingKind,
+  ObituaryEntry,
   Point,
   TileType,
   WorldState,
@@ -127,6 +128,9 @@ const cloneWorldForStep = (world: WorldState): WorldState => ({
       ...building,
     })),
   },
+  obituary: world.obituary.map((entry) => ({
+    ...entry,
+  })),
   traffic: {},
   metrics: { ...world.metrics },
 });
@@ -1396,6 +1400,14 @@ const recordHouseholdGrowthRelationships = (firstParent: Agent, secondParent: Ag
   appendUniqueRelationship(secondParent.coParentIds, firstParent.id);
 };
 
+const createObituaryEntry = (agent: Agent, world: WorldState, cause: ObituaryEntry['cause']): ObituaryEntry => ({
+  agentId: agent.id,
+  agentName: agent.name,
+  age: agent.age,
+  cause,
+  day: world.day,
+});
+
 const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingIndex) => {
   if (world.minutesOfDay !== 0) {
     return;
@@ -1412,9 +1424,29 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
     agent.keptMaxHungerToday = agent.stats.hunger >= MAX_STAT;
   }
 
-  world.entities.agents = world.entities.agents.filter(
-    (agent) => agent.age < MAX_AGENT_AGE && agent.maxHungerStreakDays < STARVATION_CULL_DAYS,
-  );
+  const survivors: Agent[] = [];
+  const obituaryEntries: ObituaryEntry[] = [];
+
+  for (const agent of world.entities.agents) {
+    const cause =
+      agent.maxHungerStreakDays >= STARVATION_CULL_DAYS
+        ? 'starvation'
+        : agent.age >= MAX_AGENT_AGE
+          ? 'old_age'
+          : undefined;
+
+    if (cause) {
+      obituaryEntries.push(createObituaryEntry(agent, world, cause));
+      continue;
+    }
+
+    survivors.push(agent);
+  }
+
+  world.entities.agents = survivors;
+  if (obituaryEntries.length > 0) {
+    world.obituary = obituaryEntries.concat(world.obituary);
+  }
   if (world.selectedAgentId && !world.entities.agents.some((agent) => agent.id === world.selectedAgentId)) {
     world.selectedAgentId = undefined;
   }

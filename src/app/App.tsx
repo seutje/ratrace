@@ -11,10 +11,12 @@ import {
 import {
   buildCanvasUiModel,
   defaultCanvasDrawerState,
+  findCanvasUiScrollRegionAtPoint,
   findCanvasUiElementAtPoint,
   isCanvasUiPoint,
   renderCanvasUi,
   type CanvasDrawerState,
+  type CanvasScrollState,
   type CanvasUiAction,
 } from '../render/canvasUi';
 import { useSimulationLoop } from '../render/useSimulationLoop';
@@ -86,15 +88,18 @@ export const App = () => {
   const buildModeRef = useRef<BuildMode>('select');
   const overlayModeRef = useRef<OverlayMode>('none');
   const drawerStateRef = useRef<CanvasDrawerState>(defaultCanvasDrawerState);
+  const scrollStateRef = useRef<CanvasScrollState>({ obituary: 0 });
   const [size, setSize] = useState<CanvasSize>({ width: 960, height: 640 });
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [pan, setPan] = useState<PanOffset>({ x: 0, y: 0 });
   const [followAgent, setFollowAgent] = useState(false);
   const [drawerState, setDrawerState] = useState<CanvasDrawerState>(defaultCanvasDrawerState);
+  const [scrollState, setScrollState] = useState<CanvasScrollState>({ obituary: 0 });
 
   const worldWidth = useWorldStore((state) => state.world.width);
   const worldHeight = useWorldStore((state) => state.world.height);
   const selectedAgentId = useWorldStore((state) => state.world.selectedAgentId);
+  const obituaryCount = useWorldStore((state) => state.world.obituary.length);
   const paused = useWorldStore((state) => state.paused);
   const buildMode = useWorldStore((state) => state.buildMode);
   const overlayMode = useWorldStore((state) => state.overlayMode);
@@ -165,6 +170,16 @@ export const App = () => {
   useEffect(() => {
     drawerStateRef.current = drawerState;
   }, [drawerState]);
+
+  useEffect(() => {
+    scrollStateRef.current = scrollState;
+  }, [scrollState]);
+
+  useEffect(() => {
+    if (obituaryCount === 0 && scrollStateRef.current.obituary !== 0) {
+      setScrollState({ obituary: 0 });
+    }
+  }, [obituaryCount]);
 
   useEffect(() => {
     if (!followAgent) {
@@ -273,6 +288,7 @@ export const App = () => {
         height: size.height,
         overlayMode: overlayModeRef.current,
         paused: pausedRef.current,
+        scrollOffsets: scrollStateRef.current,
         selectedAgentSnapshot: useWorldStore.getState().selectedAgentSnapshot,
         width: size.width,
         world,
@@ -343,6 +359,7 @@ export const App = () => {
       height: size.height,
       overlayMode: overlayModeRef.current,
       paused: pausedRef.current,
+      scrollOffsets: scrollStateRef.current,
       selectedAgentSnapshot: useWorldStore.getState().selectedAgentSnapshot,
       width: size.width,
       world: useWorldStore.getState().world,
@@ -499,7 +516,19 @@ export const App = () => {
     }
 
     const point = getCanvasPoint(event);
-    if (isCanvasUiPoint(getCanvasUiModel(), point)) {
+    const uiModel = getCanvasUiModel();
+    const scrollRegion = findCanvasUiScrollRegionAtPoint(uiModel, point);
+    if (scrollRegion) {
+      if (scrollRegion.maxOffset > 0) {
+        setScrollState((current) => ({
+          ...current,
+          [scrollRegion.id]: Math.max(0, Math.min(scrollRegion.maxOffset, scrollRegion.offset + event.deltaY)),
+        }));
+      }
+      return;
+    }
+
+    if (isCanvasUiPoint(uiModel, point)) {
       return;
     }
     const worldPoint = {

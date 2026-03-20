@@ -88,6 +88,16 @@ export type AgentDestination = {
   kind: 'home' | 'work' | 'shop';
 };
 
+export type ObituaryCause = 'old_age' | 'starvation';
+
+export type ObituaryEntry = {
+  agentId: string;
+  agentName: string;
+  age: number;
+  cause: ObituaryCause;
+  day: number;
+};
+
 export type Agent = {
   id: string;
   name: string;
@@ -161,6 +171,7 @@ export type WorldState = {
     buildings: Building[];
   };
   selectedAgentId?: string;
+  obituary: ObituaryEntry[];
   traffic: TrafficMap;
   metrics: WorldMetrics;
 };

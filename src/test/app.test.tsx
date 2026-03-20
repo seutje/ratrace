@@ -1,12 +1,19 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from '../app/App';
-import { buildCanvasUiModel, defaultCanvasDrawerState, type CanvasDrawerState, type CanvasUiAction } from '../render/canvasUi';
+import {
+  buildCanvasUiModel,
+  defaultCanvasDrawerState,
+  type CanvasDrawerState,
+  type CanvasScrollState,
+  type CanvasUiAction,
+} from '../render/canvasUi';
 import { DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM } from '../render/canvasRenderer';
 import { useWorldStore } from '../app/store';
 
 type LocalCanvasUiState = {
   drawers: CanvasDrawerState;
   followActive: boolean;
+  scrollOffsets: CanvasScrollState;
   zoom: number;
 };
 
@@ -30,6 +37,7 @@ const WORLD_POINT = {
 const createLocalCanvasUiState = (): LocalCanvasUiState => ({
   drawers: { ...defaultCanvasDrawerState },
   followActive: false,
+  scrollOffsets: { obituary: 0 },
   zoom: DEFAULT_ZOOM,
 });
 
@@ -42,6 +50,7 @@ const getCanvasUiState = (localState: LocalCanvasUiState) => {
     height: 640,
     overlayMode: store.overlayMode,
     paused: store.paused,
+    scrollOffsets: localState.scrollOffsets,
     selectedAgentSnapshot: store.selectedAgentSnapshot,
     width: 960,
     world: store.world,
@@ -114,10 +123,11 @@ describe('App', () => {
     expect(canvas).toBeInTheDocument();
 
     const model = buildCanvasUiModel(getCanvasUiState(createLocalCanvasUiState()));
-    expect(model.panels.map((panel) => panel.title)).toEqual(['Overview', 'Overlays', 'Tools', 'Inspector']);
+    expect(model.panels.map((panel) => panel.title)).toEqual(['Overview', 'Overlays', 'Obituary', 'Tools', 'Inspector']);
     expect(model.metricCards.map((card) => card.label)).toEqual(['World Time', 'Population', 'Treasury']);
     expect(model.elements.some((entry) => entry.label === 'Show Tools')).toBe(true);
     expect(model.elements.find((entry) => entry.label === 'Show Overlays')?.rect.width).toBeGreaterThanOrEqual(120);
+    expect(model.elements.some((entry) => entry.label === 'Hide Obituary')).toBe(true);
     expect(model.elements.some((entry) => entry.label === 'Reset Zoom')).toBe(false);
     expect(model.metricCards[0]!.rect.y).toBeGreaterThan(model.panels[0]!.bodyRect!.y + 40);
   });
@@ -149,6 +159,33 @@ describe('App', () => {
 
     const model = buildCanvasUiModel(getCanvasUiState(localState));
     expect(model.elements.find((entry) => entry.label === 'Traffic')?.active).toBe(true);
+  });
+
+  it('places the obituary drawer under overlays and exposes scroll overflow for long death logs', () => {
+    const world = structuredClone(useWorldStore.getState().world);
+    world.obituary = Array.from({ length: 18 }, (_, index) => ({
+      agentId: `dead-${index + 1}`,
+      agentName: `Agent ${index + 1}`,
+      age: 20 + index,
+      cause: index % 2 === 0 ? 'old_age' : 'starvation',
+      day: 10 + index,
+    }));
+    useWorldStore.setState({ world });
+
+    const model = buildCanvasUiModel(getCanvasUiState(createLocalCanvasUiState()));
+    const overlaysPanel = model.panels[1]!;
+    const obituaryPanel = model.panels[2]!;
+
+    expect(obituaryPanel.rect.y).toBeGreaterThan(overlaysPanel.rect.y + overlaysPanel.rect.height - 1);
+    expect(obituaryPanel.summary).toBeUndefined();
+    expect(model.scrollRegions[0]?.id).toBe('obituary');
+    expect(model.scrollRegions[0]?.maxOffset).toBeGreaterThan(0);
+
+    const scrolledState = createLocalCanvasUiState();
+    scrolledState.scrollOffsets.obituary = 120;
+    const scrolledModel = buildCanvasUiModel(getCanvasUiState(scrolledState));
+
+    expect(scrolledModel.obituaryRows[0]!.rect.y).toBeLessThan(model.obituaryRows[0]!.rect.y);
   });
 
   it('activates follow mode from the canvas inspector and deactivates it when the map is dragged', async () => {
@@ -232,7 +269,7 @@ describe('App', () => {
     expect(labels).toContain('Kid Beta');
     expect(labels).toContain('Parent One');
     expect(labels).toContain('Parent Two');
-    expect(model.panels[3]!.rect.height).toBeGreaterThanOrEqual(420);
+    expect(model.panels[4]!.rect.height).toBeGreaterThanOrEqual(420);
     for (let index = 1; index < relationshipButtons.length; index += 1) {
       expect(relationshipButtons[index]!.rect.y).toBeGreaterThanOrEqual(
         relationshipButtons[index - 1]!.rect.y + relationshipButtons[index - 1]!.rect.height,
@@ -268,7 +305,7 @@ describe('App', () => {
     });
 
     const model = buildCanvasUiModel(getCanvasUiState(createLocalCanvasUiState()));
-    const inspectorPanel = model.panels[3]!;
+    const inspectorPanel = model.panels[4]!;
     const parentButtons = model.elements
       .filter((entry) => ['Parent One', 'Parent Two'].includes(entry.label))
       .sort((left, right) => left.rect.y - right.rect.y)
