@@ -148,6 +148,7 @@ const inspectorLineHeight = 18;
 const inspectorRowGap = 8;
 const inspectorLinkHeight = 28;
 const inspectorLinkGap = 6;
+const inspectorRelationshipButtonOffset = 12;
 
 const buttonTextWidthFactor = 8.1;
 const monoTextWidthFactor = 7.15;
@@ -232,6 +233,15 @@ const getOverviewContentHeight = (panelWidth: number) => {
   }
 
   return 284;
+};
+
+const getInspectorRelationshipSectionHeight = (entryCount: number) => {
+  if (entryCount === 0) {
+    return inspectorLineHeight + inspectorRowGap;
+  }
+
+  const stackHeight = entryCount * inspectorLinkHeight + (entryCount - 1) * inspectorLinkGap;
+  return Math.max(inspectorLineHeight, stackHeight) + inspectorRowGap;
 };
 
 const getOverviewLayout = (bodyRect: Rect, world: WorldState): OverviewLayout => {
@@ -373,7 +383,7 @@ const getInspectorContentHeight = (selectedAgentSnapshot: DynamicAgentSnapshot |
   }
 
   for (const section of relationshipSections) {
-    height += section.entries.length === 0 ? inspectorLineHeight + inspectorRowGap : section.entries.length * (inspectorLinkHeight + inspectorLinkGap);
+    height += getInspectorRelationshipSectionHeight(section.entries.length);
   }
 
   return height + 16;
@@ -626,20 +636,23 @@ const buildInspectorPanel = (
     { label: 'Parents', entries: inspector.parents },
   ] satisfies InspectorRelationSection[]) {
     if (section.entries.length === 0) {
-      relationY += inspectorLineHeight + inspectorRowGap;
+      relationY += getInspectorRelationshipSectionHeight(0);
       continue;
     }
 
+    let buttonY = relationY - inspectorRelationshipButtonOffset;
     for (const entry of section.entries) {
       addButton(
         elements,
         entry.name,
-        makeRect(valueX, relationY - inspectorLinkHeight + 8, valueWidth - 10, inspectorLinkHeight),
+        makeRect(valueX, buttonY, valueWidth - 10, inspectorLinkHeight),
         { agentId: entry.id, type: 'selectAgent' },
         { kind: 'link' },
       );
-      relationY += inspectorLinkHeight + inspectorLinkGap;
+      buttonY += inspectorLinkHeight + inspectorLinkGap;
     }
+
+    relationY += getInspectorRelationshipSectionHeight(section.entries.length);
   }
 
   return { inspectorRows, panel };
@@ -863,12 +876,11 @@ const drawInspectorBody = (ctx: CanvasRenderingContext2D, state: CanvasUiLayoutS
       ctx.fillStyle = textColor;
       ctx.font = "600 12px ui-monospace, 'SFMono-Regular', monospace";
       ctx.fillText('None', valueX, rowY);
-      rowY += inspectorLineHeight + inspectorRowGap;
+      rowY += getInspectorRelationshipSectionHeight(0);
       continue;
     }
 
-    rowY += 10;
-    rowY += section.entries.length * (inspectorLinkHeight + inspectorLinkGap);
+    rowY += getInspectorRelationshipSectionHeight(section.entries.length);
   }
 };
 

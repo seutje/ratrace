@@ -224,6 +224,50 @@ describe('App', () => {
     }
   });
 
+  it('top-aligns parent relationship buttons below an empty children row', () => {
+    const world = structuredClone(useWorldStore.getState().world);
+    const [selected, parentA, parentB, otherA, otherB] = [
+      world.entities.agents[0],
+      world.entities.agents[1],
+      world.entities.agents[2],
+      world.entities.agents[3],
+      world.entities.agents[4],
+    ];
+
+    selected!.name = 'Selected Agent';
+    parentA!.name = 'Parent One';
+    parentB!.name = 'Parent Two';
+    parentA!.homeId = otherA!.homeId;
+    parentB!.homeId = otherB!.homeId;
+    selected!.childIds = [];
+    selected!.coParentIds = [];
+    selected!.parentIds = [parentA!.id, parentB!.id];
+
+    useWorldStore.setState({
+      selectedAgentSnapshot: undefined,
+      world: {
+        ...world,
+        selectedAgentId: selected!.id,
+      },
+    });
+
+    const model = buildCanvasUiModel(getCanvasUiState(createLocalCanvasUiState()));
+    const inspectorPanel = model.panels[3]!;
+    const parentButtons = model.elements
+      .filter((entry) => ['Parent One', 'Parent Two'].includes(entry.label))
+      .sort((left, right) => left.rect.y - right.rect.y)
+      .slice(-2);
+
+    expect(parentButtons).toHaveLength(2);
+
+    const detailHeight = model.inspectorRows.reduce((height, row) => height + row.values.length * 18 + 8, 0);
+    const emptyRelationshipSectionHeight = 18 + 8;
+    const parentLabelBaseline =
+      inspectorPanel.bodyRect!.y + 130 + detailHeight + emptyRelationshipSectionHeight * 3;
+
+    expect(parentButtons[0]!.rect.y).toBeGreaterThanOrEqual(parentLabelBaseline - 12);
+  });
+
   it('retargets the inspector when a relationship name is clicked', () => {
     const world = structuredClone(useWorldStore.getState().world);
     const [selected, roommate, coParent, childA] = world.entities.agents;
