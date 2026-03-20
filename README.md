@@ -51,7 +51,7 @@ Every tick runs the same ordered simulation pass in `stepWorldInPlace()`:
    - assign or reuse a route
    - move incrementally toward the next route point
    - process arrival effects such as working, sleeping, or shopping
-5. At midnight, run population turnover and household growth.
+5. At midnight, run population turnover, household consolidation, and household growth.
 6. Recalculate economy totals such as total wealth and global supply stock.
 
 The worker publishes either full snapshots or compact dynamic snapshots back to the UI, so rendering stays decoupled from the simulation state updates. The renderer interpolates only across compatible snapshots and resets interpolation on full snapshots, which prevents the follow camera from blending against stale agent indices after structural population changes.
@@ -132,6 +132,7 @@ At midnight the simulation performs long-horizon lifecycle updates.
 - Repeated full-hunger days increase hardship memory.
 - Agents that remain at maximum hunger for too many consecutive days are removed from the city.
 - Every death is recorded in the left-side `Obituary` drawer, including a visible entry count plus the cause, day, and age at death.
+- Isolated residents, and residents stuck in same-sex-only roommate households, can relocate into occupied homes with spare room, with relocation preferring households that create mixed-sex living arrangements and immediate growth opportunities.
 - If housing capacity is available, a residential household can add one new resident per day when:
   - two qualifying residents of opposite sexes live in the home
   - they each have at least `$100` and spend it when the household grows

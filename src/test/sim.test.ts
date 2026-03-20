@@ -1787,6 +1787,260 @@ describe('traffic and lifecycle', () => {
     expect(next.entities.agents[1]!.coParentIds).toEqual(['agent-1']);
   });
 
+  it('relocates isolated residents together before household growth runs', () => {
+    const world = createBlankWorld(4, 1);
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home-a' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Residential, buildingId: 'home-b' });
+    setTile(world, { x: 2, y: 0 }, { x: 2, y: 0, type: TileType.Industrial, buildingId: 'work' });
+    world.entities.buildings.push(
+      {
+        id: 'home-a',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 2,
+        pantryStock: 4,
+        pantryCapacity: 4,
+        label: 'home-a',
+      },
+      {
+        id: 'home-b',
+        kind: BuildingKind.Residential,
+        tile: { x: 1, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 2,
+        pantryStock: 4,
+        pantryCapacity: 4,
+        label: 'home-b',
+      },
+      {
+        id: 'work',
+        kind: BuildingKind.Industrial,
+        tile: { x: 2, y: 0 },
+        cash: INDUSTRIAL_STARTING_CASH,
+        stock: 0,
+        capacity: 4,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'work',
+      },
+    );
+    world.metrics.populationCapacity = 4;
+    world.entities.agents = [
+      makeTestAgent({
+        id: 'agent-1',
+        sex: AgentSex.Female,
+        name: 'Lena Bell',
+        homeId: 'home-a',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 0 }),
+        wallet: HOUSEHOLD_GROWTH_COST,
+        stats: { hunger: 10, energy: 90, happiness: 80 },
+        destination: { buildingId: 'home-a', kind: 'home' },
+        route: [{ x: 0, y: 0 }],
+        routeIndex: 0,
+      }),
+      makeTestAgent({
+        id: 'agent-2',
+        sex: AgentSex.Male,
+        name: 'Miro Grove',
+        homeId: 'home-b',
+        workId: 'work',
+        pos: tileCenter({ x: 1, y: 0 }),
+        wallet: HOUSEHOLD_GROWTH_COST,
+        stats: { hunger: 10, energy: 90, happiness: 80 },
+      }),
+    ];
+    world.minutesOfDay = 23 * 60 + 59;
+
+    const next = stepWorld(world);
+    const relocatedAgent = next.entities.agents.find((agent) => agent.id === 'agent-1')!;
+    const partnerAgent = next.entities.agents.find((agent) => agent.id === 'agent-2')!;
+
+    expect(next.entities.agents).toHaveLength(3);
+    expect(relocatedAgent.homeId).toBe('home-b');
+    expect(partnerAgent.homeId).toBe('home-b');
+    expect(relocatedAgent.pos).toEqual(tileCenter({ x: 1, y: 0 }));
+    expect(relocatedAgent.destination).toBeUndefined();
+    expect(relocatedAgent.route).toEqual([]);
+    expect(relocatedAgent.thought).toBe('Moved in with roommates.');
+    expect(next.entities.agents[2]!.parentIds).toEqual(['agent-1', 'agent-2']);
+  });
+
+  it('prefers opposite-sex households when relocating isolated residents', () => {
+    const world = createBlankWorld(5, 1);
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home-a' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Residential, buildingId: 'home-b' });
+    setTile(world, { x: 2, y: 0 }, { x: 2, y: 0, type: TileType.Residential, buildingId: 'home-c' });
+    setTile(world, { x: 3, y: 0 }, { x: 3, y: 0, type: TileType.Industrial, buildingId: 'work' });
+    world.entities.buildings.push(
+      {
+        id: 'home-a',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 2,
+        pantryStock: 4,
+        pantryCapacity: 4,
+        label: 'home-a',
+      },
+      {
+        id: 'home-b',
+        kind: BuildingKind.Residential,
+        tile: { x: 1, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 2,
+        pantryStock: 4,
+        pantryCapacity: 4,
+        label: 'home-b',
+      },
+      {
+        id: 'home-c',
+        kind: BuildingKind.Residential,
+        tile: { x: 2, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 2,
+        pantryStock: 4,
+        pantryCapacity: 4,
+        label: 'home-c',
+      },
+      {
+        id: 'work',
+        kind: BuildingKind.Industrial,
+        tile: { x: 3, y: 0 },
+        cash: INDUSTRIAL_STARTING_CASH,
+        stock: 0,
+        capacity: 4,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'work',
+      },
+    );
+    world.metrics.populationCapacity = 6;
+    world.entities.agents = [
+      makeTestAgent({
+        id: 'agent-1',
+        sex: AgentSex.Male,
+        homeId: 'home-a',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 0 }),
+        wallet: 25,
+        stats: { hunger: 10, energy: 90, happiness: 60 },
+      }),
+      makeTestAgent({
+        id: 'agent-2',
+        sex: AgentSex.Female,
+        homeId: 'home-b',
+        workId: 'work',
+        pos: tileCenter({ x: 1, y: 0 }),
+        wallet: 25,
+        stats: { hunger: 10, energy: 90, happiness: 60 },
+      }),
+      makeTestAgent({
+        id: 'agent-3',
+        sex: AgentSex.Male,
+        homeId: 'home-c',
+        workId: 'work',
+        pos: tileCenter({ x: 2, y: 0 }),
+        wallet: 25,
+        stats: { hunger: 10, energy: 90, happiness: 60 },
+      }),
+    ];
+    world.minutesOfDay = 23 * 60 + 59;
+
+    const next = stepWorld(world);
+
+    expect(next.entities.agents).toHaveLength(3);
+    expect(next.entities.agents.find((agent) => agent.id === 'agent-1')?.homeId).toBe('home-b');
+    expect(next.entities.agents.find((agent) => agent.id === 'agent-2')?.homeId).toBe('home-b');
+    expect(next.entities.agents.find((agent) => agent.id === 'agent-3')?.homeId).toBe('home-c');
+  });
+
+  it('nudges agents out of same-sex roommate households into opposite-sex households', () => {
+    const world = createBlankWorld(5, 1);
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home-a' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Residential, buildingId: 'home-b' });
+    setTile(world, { x: 2, y: 0 }, { x: 2, y: 0, type: TileType.Industrial, buildingId: 'work' });
+    world.entities.buildings.push(
+      {
+        id: 'home-a',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 2,
+        pantryStock: 4,
+        pantryCapacity: 4,
+        label: 'home-a',
+      },
+      {
+        id: 'home-b',
+        kind: BuildingKind.Residential,
+        tile: { x: 1, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 2,
+        pantryStock: 4,
+        pantryCapacity: 4,
+        label: 'home-b',
+      },
+      {
+        id: 'work',
+        kind: BuildingKind.Industrial,
+        tile: { x: 2, y: 0 },
+        cash: INDUSTRIAL_STARTING_CASH,
+        stock: 0,
+        capacity: 4,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'work',
+      },
+    );
+    world.metrics.populationCapacity = 4;
+    world.entities.agents = [
+      makeTestAgent({
+        id: 'agent-1',
+        sex: AgentSex.Male,
+        homeId: 'home-a',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 0 }),
+        wallet: 25,
+        stats: { hunger: 10, energy: 90, happiness: 60 },
+      }),
+      makeTestAgent({
+        id: 'agent-2',
+        sex: AgentSex.Male,
+        homeId: 'home-a',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 0 }),
+        wallet: 25,
+        stats: { hunger: 10, energy: 90, happiness: 60 },
+      }),
+      makeTestAgent({
+        id: 'agent-3',
+        sex: AgentSex.Female,
+        homeId: 'home-b',
+        workId: 'work',
+        pos: tileCenter({ x: 1, y: 0 }),
+        wallet: 25,
+        stats: { hunger: 10, energy: 90, happiness: 60 },
+      }),
+    ];
+    world.minutesOfDay = 23 * 60 + 59;
+
+    const next = stepWorld(world);
+
+    expect(next.entities.agents).toHaveLength(3);
+    expect(next.entities.agents.find((agent) => agent.id === 'agent-1')?.homeId).toBe('home-b');
+    expect(next.entities.agents.find((agent) => agent.id === 'agent-2')?.homeId).toBe('home-a');
+    expect(next.entities.agents.find((agent) => agent.id === 'agent-3')?.homeId).toBe('home-b');
+  });
+
   it('limits household growth to one new resident per household each day', () => {
     const world = createBlankWorld(4, 1);
     setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });

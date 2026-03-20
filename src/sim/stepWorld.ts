@@ -540,6 +540,26 @@ const clearAgentRoute = (agent: Agent) => {
   agent.routeMapVersion = 0;
 };
 
+const invalidateAgentCommuteState = (agent: Agent) => {
+  clearTravelTracking(agent);
+  clearAgentRoute(agent);
+  agent.destination = undefined;
+  agent.commuteToWorkRoute = null;
+  agent.commuteToWorkRouteMapVersion = 0;
+  agent.commuteToHomeRoute = null;
+  agent.commuteToHomeRouteMapVersion = 0;
+};
+
+const relocateAgentHome = (agent: Agent, targetHome: Building) => {
+  agent.homeId = targetHome.id;
+  agent.pos.x = targetHome.tile.x + 0.5;
+  agent.pos.y = targetHome.tile.y + 0.5;
+  agent.sleepUntilTick = undefined;
+  agent.state = AgentState.Idle;
+  agent.thought = 'Moved in with roommates.';
+  invalidateAgentCommuteState(agent);
+};
+
 const moveAxisToward = (current: number, target: number, maxStep: number) => {
   const delta = target - current;
   const used = Math.min(Math.abs(delta), maxStep);
@@ -1297,6 +1317,9 @@ const appendUniqueRelationship = (relationships: string[], relatedAgentId: strin
 
 const areOpposingSexes = (first: Agent, second: Agent) => first.sex !== second.sex;
 
+const hasOppositeSexResident = (agent: Agent, residents: Agent[]) =>
+  residents.some((resident) => resident.id !== agent.id && resident.sex !== agent.sex);
+
 const getHouseholdGrowthScore = (agent: Agent) =>
   agent.wallet - HOUSEHOLD_GROWTH_WALLET_THRESHOLD +
   (agent.stats.happiness - HOUSEHOLD_GROWTH_HAPPINESS_THRESHOLD) * 10;
@@ -1320,6 +1343,127 @@ const getEligibleHouseholdGrowthPair = (residents: Agent[]) => {
   }
 
   return undefined;
+};
+
+type RelocationReason = 'solo' | 'sameSexRoommates';
+
+const getRelocationReason = (agent: Agent, residents: Agent[]): RelocationReason | undefined => {
+  if (residents.length === 1 && residents[0]?.id === agent.id) {
+    return 'solo';
+  }
+
+  if (residents.length > 1 && !hasOppositeSexResident(agent, residents)) {
+    return 'sameSexRoommates';
+  }
+
+  return undefined;
+};
+
+const getRelocationOpportunityScore = (agent: Agent, targetResidents: Agent[]) => {
+  const oppositeSexResidents = targetResidents.filter((resident) => resident.sex !== agent.sex).length;
+  const sameSexResidents = targetResidents.length - oppositeSexResidents;
+  const createsEligiblePair = getEligibleHouseholdGrowthPair(targetResidents.concat(agent)) !== undefined;
+
+  return (
+    (createsEligiblePair ? 100000 : 0) +
+    oppositeSexResidents * 1000 +
+    targetResidents.length * 100 -
+    sameSexResidents * 10
+  );
+};
+
+const pickRelocationHome = (
+  homes: Building[],
+  households: Map<string, Agent[]>,
+  occupied: Map<string, number>,
+  agent: Agent,
+  reason: RelocationReason,
+) => {
+  let chosen: Building | undefined;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (const home of homes) {
+    if (home.id === agent.homeId) {
+      continue;
+    }
+
+    const residents = households.get(home.id) ?? [];
+    const occupancy = occupied.get(home.id) ?? 0;
+    if (residents.length <= 0 || occupancy >= home.capacity) {
+      continue;
+    }
+    if (reason === 'sameSexRoommates' && !hasOppositeSexResident(agent, residents)) {
+      continue;
+    }
+
+    const score = getRelocationOpportunityScore(agent, residents);
+    const distance = Math.abs(home.tile.x - agent.pos.x) + Math.abs(home.tile.y - agent.pos.y);
+    if (
+      !chosen ||
+      score > bestScore ||
+      (score === bestScore && distance < bestDistance) ||
+      (score === bestScore && distance === bestDistance && home.id < chosen.id)
+    ) {
+      chosen = home;
+      bestScore = score;
+      bestDistance = distance;
+    }
+  }
+
+  return chosen;
+};
+
+const consolidateHouseholds = (
+  homes: Building[],
+  households: Map<string, Agent[]>,
+  occupied: Map<string, number>,
+) => {
+  const relocationCandidates = Array.from(households.values())
+    .flatMap((residents) =>
+      residents
+        .map((agent) => ({
+          agent,
+          reason: getRelocationReason(agent, residents),
+        }))
+        .filter((entry): entry is { agent: Agent; reason: RelocationReason } => entry.reason !== undefined),
+    )
+    .sort(
+      (left, right) =>
+        Number(right.reason === 'solo') - Number(left.reason === 'solo') ||
+        Number(qualifiesForHouseholdGrowth(right.agent)) - Number(qualifiesForHouseholdGrowth(left.agent)) ||
+        getHouseholdGrowthScore(right.agent) - getHouseholdGrowthScore(left.agent) ||
+        left.agent.id.localeCompare(right.agent.id),
+    );
+
+  for (const { agent } of relocationCandidates) {
+    const currentResidents = households.get(agent.homeId);
+    if (!currentResidents) {
+      continue;
+    }
+
+    const reason = getRelocationReason(agent, currentResidents);
+    if (!reason) {
+      continue;
+    }
+
+    const targetHome = pickRelocationHome(homes, households, occupied, agent, reason);
+    if (!targetHome) {
+      continue;
+    }
+
+    households.delete(agent.homeId);
+    occupied.delete(agent.homeId);
+
+    const targetResidents = households.get(targetHome.id);
+    if (targetResidents) {
+      targetResidents.push(agent);
+    } else {
+      households.set(targetHome.id, [agent]);
+    }
+    occupied.set(targetHome.id, (occupied.get(targetHome.id) ?? 0) + 1);
+    relocateAgentHome(agent, targetHome);
+  }
 };
 
 const getFather = (firstParent: Agent, secondParent: Agent) =>
@@ -1456,22 +1600,22 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
   for (const home of homes) {
     capacity += home.capacity;
   }
-  const freeSlots = capacity - world.entities.agents.length;
+  const occupied = new Map<string, number>();
+  const households = new Map<string, Agent[]>();
 
-  if (freeSlots > 0) {
-    const occupied = new Map<string, number>();
-    const households = new Map<string, Agent[]>();
-
-    for (const agent of world.entities.agents) {
-      occupied.set(agent.homeId, (occupied.get(agent.homeId) ?? 0) + 1);
-      const residents = households.get(agent.homeId);
-      if (residents) {
-        residents.push(agent);
-      } else {
-        households.set(agent.homeId, [agent]);
-      }
+  for (const agent of world.entities.agents) {
+    occupied.set(agent.homeId, (occupied.get(agent.homeId) ?? 0) + 1);
+    const residents = households.get(agent.homeId);
+    if (residents) {
+      residents.push(agent);
+    } else {
+      households.set(agent.homeId, [agent]);
     }
+  }
 
+  consolidateHouseholds(homes, households, occupied);
+
+  if (capacity - world.entities.agents.length > 0) {
     const growthHomes = homes.filter((home) => {
       const residents = households.get(home.id) ?? [];
       return getEligibleHouseholdGrowthPair(residents) !== undefined;
