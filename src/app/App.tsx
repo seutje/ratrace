@@ -8,16 +8,17 @@ import {
   renderDynamicWorld,
   renderStaticWorld,
 } from '../render/canvasRenderer';
+import {
+  buildCanvasUiModel,
+  defaultCanvasDrawerState,
+  findCanvasUiElementAtPoint,
+  isCanvasUiPoint,
+  renderCanvasUi,
+  type CanvasDrawerState,
+  type CanvasUiAction,
+} from '../render/canvasUi';
 import { useSimulationLoop } from '../render/useSimulationLoop';
-import { WorldState } from '../sim/types';
-import { BuildMenu } from '../ui/BuildMenu';
-import { Controls } from '../ui/Controls';
-import { Drawer } from '../ui/Drawer';
-import { Hud } from '../ui/Hud';
-import { Inspector } from '../ui/Inspector';
-import { OverlayMenu } from '../ui/OverlayMenu';
-import { getOverlayModeLabel } from '../ui/overlayOptions';
-import { cx, displayHeadingClass, drawerPillClass } from '../ui/styles';
+import { BuildMode, OverlayMode, WorldState } from '../sim/types';
 import {
   findAgentAtCanvasPoint,
   getRenderInterpolationState,
@@ -45,10 +46,15 @@ type CanvasPoint = {
 };
 
 type DragState = {
+  kind: 'canvas';
+  moved: boolean;
+  originPan: PanOffset;
   pointerId: number;
   startPoint: CanvasPoint;
-  originPan: PanOffset;
-  moved: boolean;
+} | {
+  kind: 'ui';
+  pointerId: number;
+  pressedElementId?: string;
 };
 
 const zoomIn = (zoom: number) => Math.min(MAX_ZOOM, zoom * 2);
@@ -69,15 +75,21 @@ export const App = () => {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const staticLayerRef = useRef<HTMLCanvasElement | null>(null);
   const staticLayerKeyRef = useRef('');
+  const canvasUiModelRef = useRef<ReturnType<typeof buildCanvasUiModel> | null>(null);
   const viewportRef = useRef<ReturnType<typeof calculateViewport> | null>(null);
   const panRef = useRef<PanOffset>({ x: 0, y: 0 });
   const zoomRef = useRef(DEFAULT_ZOOM);
   const dragStateRef = useRef<DragState | null>(null);
   const followAgentRef = useRef(false);
+  const pausedRef = useRef(false);
+  const buildModeRef = useRef<BuildMode>('select');
+  const overlayModeRef = useRef<OverlayMode>('none');
+  const drawerStateRef = useRef<CanvasDrawerState>(defaultCanvasDrawerState);
   const [size, setSize] = useState<CanvasSize>({ width: 960, height: 640 });
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [pan, setPan] = useState<PanOffset>({ x: 0, y: 0 });
   const [followAgent, setFollowAgent] = useState(false);
+  const [drawerState, setDrawerState] = useState<CanvasDrawerState>(defaultCanvasDrawerState);
 
   const worldWidth = useWorldStore((state) => state.world.width);
   const worldHeight = useWorldStore((state) => state.world.height);
@@ -134,8 +146,34 @@ export const App = () => {
   }, [pan, viewport, zoom]);
 
   useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
+
+  useEffect(() => {
+    buildModeRef.current = buildMode;
+  }, [buildMode]);
+
+  useEffect(() => {
+    overlayModeRef.current = overlayMode;
+  }, [overlayMode]);
+
+  useEffect(() => {
     followAgentRef.current = followAgent;
   }, [followAgent]);
+
+  useEffect(() => {
+    drawerStateRef.current = drawerState;
+  }, [drawerState]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    canvas.dataset.followActive = String(followAgent);
+    canvas.dataset.zoom = zoom.toFixed(3);
+  }, [followAgent, zoom]);
 
   useEffect(() => {
     if (!followAgent) {
@@ -225,7 +263,19 @@ export const App = () => {
         renderStaticWorld(context, world, effectiveViewport);
       }
 
-      renderDynamicWorld(context, world, effectiveViewport, overlayMode, interpolation);
+      renderDynamicWorld(context, world, effectiveViewport, overlayModeRef.current, interpolation);
+      canvasUiModelRef.current = renderCanvasUi(context, {
+        buildMode: buildModeRef.current,
+        drawers: drawerStateRef.current,
+        followActive: followAgentRef.current,
+        height: size.height,
+        overlayMode: overlayModeRef.current,
+        paused: pausedRef.current,
+        selectedAgentSnapshot: useWorldStore.getState().selectedAgentSnapshot,
+        width: size.width,
+        world,
+        zoom: zoomRef.current,
+      });
     };
 
     const renderFrame = (time: number) => {
@@ -236,7 +286,7 @@ export const App = () => {
     frame = requestAnimationFrame(renderFrame);
 
     return () => cancelAnimationFrame(frame);
-  }, [overlayMode, size, viewport]);
+  }, [size, viewport]);
 
   const getCanvasPoint = (
     event: PointerEvent<HTMLCanvasElement> | WheelEvent<HTMLCanvasElement>,
@@ -254,13 +304,13 @@ export const App = () => {
       return;
     }
 
-    if (buildMode !== 'select') {
+    if (buildModeRef.current !== 'select') {
       const tile = tileFromCanvasPoint(point, currentViewport.tileSize, {
         x: currentViewport.offsetX,
         y: currentViewport.offsetY,
       });
       if (tile.x >= 0 && tile.y >= 0 && tile.x < worldWidth && tile.y < worldHeight) {
-        paintTile(tile.x, tile.y, buildMode);
+        paintTile(tile.x, tile.y, buildModeRef.current);
       }
       return;
     }
@@ -282,24 +332,95 @@ export const App = () => {
     setPan({ x: 0, y: 0 });
   };
 
+  const getCanvasUiModel = () =>
+    canvasUiModelRef.current ??
+    buildCanvasUiModel({
+      buildMode: buildModeRef.current,
+      drawers: drawerStateRef.current,
+      followActive: followAgentRef.current,
+      height: size.height,
+      overlayMode: overlayModeRef.current,
+      paused: pausedRef.current,
+      selectedAgentSnapshot: useWorldStore.getState().selectedAgentSnapshot,
+      width: size.width,
+      world: useWorldStore.getState().world,
+      zoom: zoomRef.current,
+    });
+
+  const handleCanvasUiAction = (action: CanvasUiAction) => {
+    switch (action.type) {
+      case 'toggleDrawer':
+        setDrawerState((current) => ({
+          ...current,
+          [action.drawer]: !current[action.drawer],
+        }));
+        break;
+      case 'togglePause':
+        setPaused(!pausedRef.current);
+        break;
+      case 'singleStep':
+        singleStep();
+        break;
+      case 'resetSimulation':
+        reset();
+        break;
+      case 'zoomIn':
+        setZoom((currentZoom) => zoomIn(currentZoom));
+        break;
+      case 'zoomOut':
+        setZoom((currentZoom) => zoomOut(currentZoom));
+        break;
+      case 'resetZoom':
+        resetView();
+        break;
+      case 'setBuildMode':
+        setBuildMode(action.mode);
+        break;
+      case 'setOverlayMode':
+        setOverlayMode(action.mode);
+        break;
+      case 'toggleFollow':
+        setFollowAgent((currentFollow) => !currentFollow);
+        break;
+      case 'selectAgent':
+        selectAgent(action.agentId);
+        break;
+    }
+  };
+
   const handlePointerDown = (event: PointerEvent<HTMLCanvasElement>) => {
     if (event.button !== 0) {
       return;
     }
 
     const point = getCanvasPoint(event);
+    const uiModel = getCanvasUiModel();
+    const uiElement = findCanvasUiElementAtPoint(uiModel, point);
+    const uiPoint = uiElement ?? (isCanvasUiPoint(uiModel, point) ? { id: undefined } : undefined);
+
+    if (uiPoint) {
+      dragStateRef.current = {
+        kind: 'ui',
+        pointerId: event.pointerId,
+        pressedElementId: uiElement?.id,
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+
     dragStateRef.current = {
+      kind: 'canvas',
+      moved: false,
+      originPan: panRef.current,
       pointerId: event.pointerId,
       startPoint: point,
-      originPan: panRef.current,
-      moved: false,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const handlePointerMove = (event: PointerEvent<HTMLCanvasElement>) => {
     const dragState = dragStateRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) {
+    if (!dragState || dragState.pointerId !== event.pointerId || dragState.kind !== 'canvas') {
       return;
     }
 
@@ -332,6 +453,17 @@ export const App = () => {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
 
+    if (dragState.kind === 'ui') {
+      dragStateRef.current = null;
+      const uiElement = dragState.pressedElementId
+        ? findCanvasUiElementAtPoint(getCanvasUiModel(), getCanvasPoint(event))
+        : undefined;
+      if (uiElement && uiElement.id === dragState.pressedElementId) {
+        handleCanvasUiAction(uiElement.action);
+      }
+      return;
+    }
+
     dragStateRef.current = null;
 
     if (!dragState.moved) {
@@ -351,7 +483,9 @@ export const App = () => {
     }
 
     dragStateRef.current = null;
-    setPan(dragState.originPan);
+    if (dragState.kind === 'canvas') {
+      setPan(dragState.originPan);
+    }
   };
 
   const handleWheel = (event: WheelEvent<HTMLCanvasElement>) => {
@@ -363,6 +497,9 @@ export const App = () => {
     }
 
     const point = getCanvasPoint(event);
+    if (isCanvasUiPoint(getCanvasUiModel(), point)) {
+      return;
+    }
     const worldPoint = {
       x: (point.x - currentViewport.offsetX) / currentViewport.tileSize,
       y: (point.y - currentViewport.offsetY) / currentViewport.tileSize,
@@ -388,70 +525,13 @@ export const App = () => {
         <canvas
           aria-label="RatRace world canvas"
           ref={canvasRef}
-          className={cx('block h-full w-full')}
+          className="block h-full w-full"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerRelease}
           onPointerCancel={handlePointerCancel}
           onWheel={handleWheel}
         />
-      </div>
-      <div className="pointer-events-none absolute inset-0 z-[2]">
-        <Drawer
-          title="Overview"
-          className="left-1/2 top-[18px] w-[min(1120px,calc(100vw-36px))] -translate-x-1/2 max-[960px]:w-[min(920px,calc(100vw-36px))] max-[720px]:top-3 max-[720px]:w-[calc(100vw-24px)]"
-          summary={<span className={drawerPillClass}>{paused ? 'Paused' : 'Live'}</span>}
-        >
-          <div className="grid items-start gap-[18px] min-[961px]:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
-            <div className="grid gap-2 px-1 pt-1">
-              <h1 className={cx(displayHeadingClass, 'm-0 text-[clamp(1.2rem,2.5vw,2.05rem)] leading-[0.88]')}>
-                RatRace
-              </h1>
-              <p className="m-0 max-w-[42ch] text-[#604f40]">
-                Drag with the left mouse button to pan. Scroll to zoom the city like a map.
-              </p>
-            </div>
-            <Hud variant="inline" />
-          </div>
-        </Drawer>
-        <Drawer
-          title="Tools"
-          className="bottom-[18px] left-[18px] w-[min(360px,calc(100vw-32px))] max-[960px]:right-[18px] max-[960px]:left-auto max-[960px]:w-[min(420px,calc(100vw-36px))] max-[720px]:bottom-3 max-[720px]:w-[calc(100vw-24px)]"
-          defaultOpen={false}
-        >
-          <div className="grid gap-[14px]">
-            <Controls
-              paused={paused}
-              zoom={zoom}
-              canZoomIn={zoom < MAX_ZOOM}
-              canZoomOut={zoom > MIN_ZOOM}
-              onPauseToggle={() => setPaused(!paused)}
-              onSingleStep={singleStep}
-              onReset={reset}
-              onZoomIn={() => setZoom((currentZoom) => zoomIn(currentZoom))}
-              onZoomOut={() => setZoom((currentZoom) => zoomOut(currentZoom))}
-              onZoomReset={resetView}
-            />
-            <BuildMenu mode={buildMode} onChange={setBuildMode} />
-          </div>
-        </Drawer>
-        <Drawer
-          title="Overlays"
-          className="left-[18px] top-[18px] w-[min(300px,calc(100vw-36px))] max-[960px]:w-[min(320px,calc(100vw-36px))] max-[720px]:top-[136px] max-[720px]:w-[calc(100vw-24px)]"
-          defaultOpen={false}
-          summary={<span className={drawerPillClass}>{getOverlayModeLabel(overlayMode)}</span>}
-        >
-          <OverlayMenu mode={overlayMode} onChange={setOverlayMode} />
-        </Drawer>
-        <Drawer
-          title="Inspector"
-          className="right-[18px] top-[18px] max-h-[calc(100vh-36px)] w-[min(360px,calc(100vw-32px))] max-[960px]:bottom-[18px] max-[960px]:left-[18px] max-[960px]:right-auto max-[960px]:top-auto max-[960px]:w-[min(320px,calc(100vw-36px))] max-[720px]:top-[344px] max-[720px]:bottom-auto max-[720px]:max-h-[calc(100vh-356px)] max-[720px]:w-[calc(100vw-24px)]"
-        >
-          <Inspector
-            followActive={followAgent}
-            onFollowToggle={() => setFollowAgent((currentFollow) => !currentFollow)}
-          />
-        </Drawer>
       </div>
     </main>
   );

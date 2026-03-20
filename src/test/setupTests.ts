@@ -26,6 +26,10 @@ const mockCanvasContext = {
   fill: vi.fn(),
   stroke: vi.fn(),
   fillText: vi.fn(),
+  save: vi.fn(),
+  restore: vi.fn(),
+  rect: vi.fn(),
+  clip: vi.fn(),
   createLinearGradient: vi.fn(() => ({
     addColorStop: vi.fn(),
   })),
