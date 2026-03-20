@@ -49,7 +49,7 @@ import {
   WorldState,
   SimulationAdvanceResult,
 } from './types';
-import { createRuntimeAgentName } from './naming';
+import { createRuntimeAgentName, getLastName } from './naming';
 import {
   clamp,
   distance,
@@ -1266,16 +1266,17 @@ const getEligibleHouseholdGrowthPair = (residents: Agent[]) => {
   return undefined;
 };
 
+const getFather = (firstParent: Agent, secondParent: Agent) =>
+  firstParent.sex === AgentSex.Male ? firstParent : secondParent;
+
 const createHouseholdGrowthAgent = (
   world: WorldState,
   home: Building,
   assignment: NonNullable<ReturnType<typeof pickEmploymentAssignment>>,
   firstParent: Agent,
   secondParent: Agent,
-) => ({
-  id: nextAgentId(world),
-  name: createRuntimeAgentName(world, home.tile, assignment.shiftStartMinute),
-  sex: createSeededAgentSex(world.seed, [
+) => {
+  const childSex = createSeededAgentSex(world.seed, [
     world.day,
     world.tick,
     world.entities.agents.length + 1,
@@ -1284,49 +1285,56 @@ const createHouseholdGrowthAgent = (
     assignment.shiftStartMinute,
     firstParent.sex === AgentSex.Female ? 1 : 2,
     secondParent.sex === AgentSex.Female ? 1 : 2,
-  ]),
-  pos: { x: home.tile.x + 0.5, y: home.tile.y + 0.5 },
-  wallet: 18,
-  carriedMeals: 0,
-  stats: { hunger: 24, energy: 72, happiness: 64 },
-  traits: createInheritedAgentTraits(world.seed, firstParent, secondParent, [
-    world.day,
-    world.tick,
-    world.entities.agents.length + 1,
-    home.tile.x,
-    home.tile.y,
-    assignment.shiftStartMinute,
-  ]),
-  memory: createAgentMemory(),
-  homeId: home.id,
-  workId: assignment.workId,
-  parentIds: [firstParent.id, secondParent.id],
-  childIds: [],
-  coParentIds: [],
-  state: AgentState.Idle,
-  thought: 'New to the household.',
-  route: [],
-  routeIndex: 0,
-  routeComputeCount: 0,
-  routeMapVersion: world.metrics.mapVersion,
-  commuteToWorkRoute: null,
-  commuteToWorkRouteMapVersion: 0,
-  commuteToHomeRoute: null,
-  commuteToHomeRouteMapVersion: 0,
-  destination: undefined,
-  travelPurpose: undefined,
-  travelStartTick: undefined,
-  lastShoppedTick: undefined,
-  sleepUntilTick: undefined,
-  shiftStartMinute: assignment.shiftStartMinute,
-  shiftDay: 0,
-  shiftWorkMinutes: 0,
-  paidShiftWorkMinutes: 0,
-  lastCompletedShiftDay: 0,
-  daysInCity: 0,
-  maxHungerStreakDays: 0,
-  keptMaxHungerToday: false,
-});
+  ]);
+  const fatherLastName = getLastName(getFather(firstParent, secondParent).name);
+
+  return {
+    id: nextAgentId(world),
+    name: createRuntimeAgentName(world, home.tile, assignment.shiftStartMinute, childSex, fatherLastName),
+    sex: childSex,
+    pos: { x: home.tile.x + 0.5, y: home.tile.y + 0.5 },
+    wallet: 18,
+    carriedMeals: 0,
+    stats: { hunger: 24, energy: 72, happiness: 64 },
+    traits: createInheritedAgentTraits(world.seed, firstParent, secondParent, [
+      world.day,
+      world.tick,
+      world.entities.agents.length + 1,
+      home.tile.x,
+      home.tile.y,
+      assignment.shiftStartMinute,
+    ]),
+    memory: createAgentMemory(),
+    homeId: home.id,
+    workId: assignment.workId,
+    parentIds: [firstParent.id, secondParent.id],
+    childIds: [],
+    coParentIds: [],
+    state: AgentState.Idle,
+    thought: 'New to the household.',
+    route: [],
+    routeIndex: 0,
+    routeComputeCount: 0,
+    routeMapVersion: world.metrics.mapVersion,
+    commuteToWorkRoute: null,
+    commuteToWorkRouteMapVersion: 0,
+    commuteToHomeRoute: null,
+    commuteToHomeRouteMapVersion: 0,
+    destination: undefined,
+    travelPurpose: undefined,
+    travelStartTick: undefined,
+    lastShoppedTick: undefined,
+    sleepUntilTick: undefined,
+    shiftStartMinute: assignment.shiftStartMinute,
+    shiftDay: 0,
+    shiftWorkMinutes: 0,
+    paidShiftWorkMinutes: 0,
+    lastCompletedShiftDay: 0,
+    daysInCity: 0,
+    maxHungerStreakDays: 0,
+    keptMaxHungerToday: false,
+  };
+};
 
 const recordHouseholdGrowthRelationships = (firstParent: Agent, secondParent: Agent, child: Agent) => {
   appendUniqueRelationship(firstParent.childIds, child.id);

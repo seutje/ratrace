@@ -1,7 +1,9 @@
 import { createRng, Rng } from './random';
-import { BuildingKind, Point, WorldState } from './types';
+import { AgentSex, BuildingKind, Point, WorldState } from './types';
 
-const firstNames = ['Ari', 'Bea', 'Cleo', 'Dax', 'Etta', 'Faye', 'Gus', 'Ivo', 'Juno', 'Kip', 'Lena', 'Miro'];
+export const femaleFirstNames = ['Bea', 'Cleo', 'Etta', 'Faye', 'Lena', 'Mara'];
+export const maleFirstNames = ['Dax', 'Gus', 'Ivo', 'Kip', 'Miro', 'Nico'];
+export const unisexFirstNames = ['Ari', 'Juno', 'Remy', 'Sage'];
 const lastNames = ['Ash', 'Bell', 'Cinder', 'Dune', 'Elm', 'Flint', 'Grove', 'Hale', 'Irons', 'Jett', 'Keene', 'Lark'];
 const districts = ['North', 'South', 'East', 'West', 'Central'] as const;
 const residentialLabels = ['Court', 'House', 'Heights', 'Terrace', 'Square', 'Row'];
@@ -25,6 +27,14 @@ const mixSeed = (seed: number, ...parts: number[]) => {
 
 const pick = <Value>(values: Value[], rng: Rng) => values[Math.floor(rng() * values.length)]!;
 
+const getFirstNamePool = (sex: AgentSex) =>
+  sex === AgentSex.Male ? [...maleFirstNames, ...unisexFirstNames] : [...femaleFirstNames, ...unisexFirstNames];
+
+export const getLastName = (name: string) => {
+  const parts = name.trim().split(/\s+/);
+  return parts.at(-1) ?? name;
+};
+
 export const createBuildingLabel = (seed: number, rng: Rng, kind: BuildingKind, index: number) => {
   const district = districts[(seed + index) % districts.length]!;
   const serial = Math.floor(rng() * 90) + 10;
@@ -38,7 +48,8 @@ export const createBuildingLabel = (seed: number, rng: Rng, kind: BuildingKind, 
   return `${district} ${industrialLabels[index % industrialLabels.length]} ${serial}`;
 };
 
-export const createAgentName = (rng: Rng) => `${pick(firstNames, rng)} ${pick(lastNames, rng)}`;
+export const createAgentName = (rng: Rng, sex: AgentSex, lastName?: string) =>
+  `${pick(getFirstNamePool(sex), rng)} ${lastName ?? pick(lastNames, rng)}`;
 
 export const createRuntimeBuildingLabel = (world: WorldState, kind: BuildingKind, point: Point) => {
   const index = world.entities.buildings.filter((building) => building.kind === kind).length;
@@ -46,7 +57,13 @@ export const createRuntimeBuildingLabel = (world: WorldState, kind: BuildingKind
   return createBuildingLabel(seed, createRng(seed), kind, index);
 };
 
-export const createRuntimeAgentName = (world: WorldState, home: Point, shiftStartMinute: number) => {
+export const createRuntimeAgentName = (
+  world: WorldState,
+  home: Point,
+  shiftStartMinute: number,
+  sex: AgentSex,
+  lastName?: string,
+) => {
   const seed = mixSeed(world.seed, world.day, world.tick, world.entities.agents.length + 1, home.x, home.y, shiftStartMinute);
-  return createAgentName(createRng(seed));
+  return createAgentName(createRng(seed), sex, lastName);
 };

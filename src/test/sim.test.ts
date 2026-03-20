@@ -27,6 +27,7 @@ import { AgentSex, BuildingKind, AgentState, TileType, WorldState } from '../sim
 import { findPath } from '../sim/pathfinding';
 import { getCongestionSpeedFactor } from '../sim/traffic';
 import { getAgentTrafficKey, getRouteTargetPoint } from '../sim/lanes';
+import { femaleFirstNames, getLastName, maleFirstNames, unisexFirstNames } from '../sim/naming';
 import { getTile, setTile, tileCenter, toClockNumber } from '../sim/utils';
 
 const residentialLabelPattern = /^(North|South|East|West|Central) (Court|House|Heights|Terrace|Square|Row) \d{2}$/;
@@ -48,6 +49,10 @@ const freshMemory = {
   shoppingTrips: 0,
   completedShifts: 0,
   unpaidHours: 0,
+};
+const firstNameBySex = {
+  [AgentSex.Female]: new Set([...femaleFirstNames, ...unisexFirstNames]),
+  [AgentSex.Male]: new Set([...maleFirstNames, ...unisexFirstNames]),
 };
 
 const stepTimes = (world: WorldState, ticks: number) => {
@@ -107,6 +112,8 @@ const makeTestAgent = (overrides: Partial<WorldState['entities']['agents'][numbe
   keptMaxHungerToday: false,
   ...overrides,
 });
+
+const getFirstName = (name: string) => name.trim().split(/\s+/)[0] ?? name;
 
 const collectConnectedRoads = (world: WorldState) => {
   const start = world.tiles.find((tile) => tile.type === TileType.Road);
@@ -188,6 +195,7 @@ describe('world generation', () => {
     expect(world.entities.buildings.some((building) => building.kind === BuildingKind.Residential && building.pantryCapacity > 0)).toBe(true);
     expect(world.entities.agents.every((agent) => agent.memory.averageCommuteMinutes === 0)).toBe(true);
     expect(world.entities.agents.every((agent) => agent.sex === AgentSex.Female || agent.sex === AgentSex.Male)).toBe(true);
+    expect(world.entities.agents.every((agent) => firstNameBySex[agent.sex].has(getFirstName(agent.name)))).toBe(true);
     expect(new Set(world.entities.agents.slice(0, 50).map((agent) => agent.traits.appetite)).size).toBeGreaterThan(1);
   });
 
@@ -1643,6 +1651,7 @@ describe('traffic and lifecycle', () => {
       makeTestAgent({
         id: 'agent-1',
         sex: AgentSex.Female,
+        name: 'Lena Bell',
         homeId: 'home',
         workId: 'work',
         pos: tileCenter({ x: 0, y: 0 }),
@@ -1652,6 +1661,7 @@ describe('traffic and lifecycle', () => {
       makeTestAgent({
         id: 'agent-2',
         sex: AgentSex.Male,
+        name: 'Miro Grove',
         homeId: 'home',
         workId: 'work',
         pos: tileCenter({ x: 0, y: 0 }),
@@ -1672,6 +1682,8 @@ describe('traffic and lifecycle', () => {
     expect(next.entities.agents[2]!.name).toMatch(agentNamePattern);
     expect(next.entities.agents[2]!.name.startsWith('Resident ')).toBe(false);
     expect(next.entities.agents[2]!.sex === AgentSex.Female || next.entities.agents[2]!.sex === AgentSex.Male).toBe(true);
+    expect(firstNameBySex[next.entities.agents[2]!.sex].has(getFirstName(next.entities.agents[2]!.name))).toBe(true);
+    expect(getLastName(next.entities.agents[2]!.name)).toBe('Grove');
     expect(next.entities.agents[2]!.thought).toBe('New to the household.');
     expect(next.entities.agents[2]!.parentIds).toEqual(['agent-1', 'agent-2']);
     expect(next.entities.agents[0]!.childIds).toEqual([next.entities.agents[2]!.id]);

@@ -348,10 +348,11 @@ export const createStarterWorld = (seed = STARTER_WORLD_SEED, population = START
   const agents = Array.from({ length: population }, (_, index) => {
     const home = homeSlots[index]!;
     const assignment = employmentAssignments[index]!;
+    const sex = createAgentSex(rng);
     return {
       id: `agent-${index + 1}`,
-      name: createAgentName(rng),
-      sex: createAgentSex(rng),
+      name: createAgentName(rng, sex),
+      sex,
       pos: { x: home.tile.x + 0.5, y: home.tile.y + 0.5 },
       wallet: 20 + Math.floor(rng() * 20),
       carriedMeals: 0,
