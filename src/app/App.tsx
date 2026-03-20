@@ -167,16 +167,6 @@ export const App = () => {
   }, [drawerState]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      return;
-    }
-
-    canvas.dataset.followActive = String(followAgent);
-    canvas.dataset.zoom = zoom.toFixed(3);
-  }, [followAgent, zoom]);
-
-  useEffect(() => {
     if (!followAgent) {
       return;
     }
@@ -538,6 +528,8 @@ export const App = () => {
           aria-label="RatRace world canvas"
           ref={canvasRef}
           className="block h-full w-full"
+          data-follow-active={String(followAgent)}
+          data-zoom={zoom.toFixed(3)}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerRelease}

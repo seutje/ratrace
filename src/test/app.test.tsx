@@ -22,6 +22,11 @@ const CANVAS_RECT: DOMRect = {
   toJSON: () => ({}),
 };
 
+const WORLD_POINT = {
+  x: 800,
+  y: 300,
+};
+
 const createLocalCanvasUiState = (): LocalCanvasUiState => ({
   drawers: { ...defaultCanvasDrawerState },
   followActive: false,
@@ -123,7 +128,7 @@ describe('App', () => {
     const canvas = screen.getByLabelText('RatRace world canvas');
     vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(CANVAS_RECT);
 
-    fireEvent.wheel(canvas, { clientX: 480, clientY: 320, deltaY: -500 });
+    fireEvent.wheel(canvas, { clientX: WORLD_POINT.x, clientY: WORLD_POINT.y, deltaY: -500 });
 
     await waitFor(() => {
       expect(Number(canvas.getAttribute('data-zoom'))).toBeGreaterThan(1);
@@ -162,8 +167,19 @@ describe('App', () => {
       expect(canvas).toHaveAttribute('data-follow-active', 'true');
     });
 
-    fireEvent.pointerDown(canvas, { button: 0, buttons: 1, clientX: 400, clientY: 250, pointerId: 1 });
-    fireEvent.pointerMove(canvas, { buttons: 1, clientX: 412, clientY: 262, pointerId: 1 });
+    fireEvent.pointerDown(canvas, {
+      button: 0,
+      buttons: 1,
+      clientX: WORLD_POINT.x,
+      clientY: WORLD_POINT.y,
+      pointerId: 1,
+    });
+    fireEvent.pointerMove(canvas, {
+      buttons: 1,
+      clientX: WORLD_POINT.x + 12,
+      clientY: WORLD_POINT.y + 12,
+      pointerId: 1,
+    });
 
     await waitFor(() => {
       expect(canvas).toHaveAttribute('data-follow-active', 'false');

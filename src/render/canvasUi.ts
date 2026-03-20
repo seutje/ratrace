@@ -552,9 +552,9 @@ const buildInspectorRows = (state: CanvasUiLayoutState) => {
     { label: 'Sex', values: [inspectorSexLabels[agent.sex]] },
     { label: 'Wallet', values: [`$${agent.wallet}`] },
     { label: 'Lunches', values: [String(agent.carriedMeals)] },
-    { label: 'Hunger', values: [agent.stats.hunger.toFixed(1)] },
-    { label: 'Energy', values: [agent.stats.energy.toFixed(1)] },
-    { label: 'Happiness', values: [agent.stats.happiness.toFixed(1)] },
+    { label: 'Hunger', values: [agent.stats.hunger.toFixed(0)] },
+    { label: 'Energy', values: [agent.stats.energy.toFixed(0)] },
+    { label: 'Happiness', values: [agent.stats.happiness.toFixed(0)] },
     {
       label: 'Traits',
       values: [
