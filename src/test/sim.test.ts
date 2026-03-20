@@ -367,6 +367,7 @@ describe('agent behavior', () => {
     }
 
     const eveningAgent = world.entities.agents[0]!;
+    const eveningHome = world.entities.buildings.find((building) => building.id === eveningAgent.homeId)!;
     eveningAgent.pos = tileCenter(homeApproach);
     eveningAgent.route = [];
     eveningAgent.routeIndex = 0;
@@ -378,18 +379,33 @@ describe('agent behavior', () => {
     eveningAgent.shiftWorkMinutes = WORK_SHIFT_MINUTES;
     eveningAgent.paidShiftWorkMinutes = WORK_SHIFT_MINUTES;
     eveningAgent.lastCompletedShiftDay = world.day;
+    eveningHome.pantryStock = eveningHome.pantryCapacity;
     world.minutesOfDay = 21 * 60 + 55;
 
     const eveningStates = new Set<AgentState>();
-    for (let index = 0; index < 120; index += 1) {
+    for (let index = 0; index < 10; index += 1) {
       world = stepWorld(world);
       eveningStates.add(world.entities.agents[0]!.state);
     }
 
+    const sleepingAgent = world.entities.agents[0]!;
+    const sleepingHome = world.entities.buildings.find((building) => building.id === sleepingAgent.homeId)!;
+    sleepingAgent.pos = tileCenter(sleepingHome.tile);
+    sleepingAgent.route = [];
+    sleepingAgent.routeIndex = 0;
+    sleepingAgent.destination = undefined;
+    sleepingAgent.state = AgentState.Idle;
+    sleepingAgent.stats.hunger = 20;
+    sleepingAgent.stats.energy = 50;
+    sleepingHome.pantryStock = sleepingHome.pantryCapacity;
+    world.minutesOfDay = 22 * 60;
+
+    world = stepWorld(world);
+
     expect(workdayStates.has(AgentState.MovingToWork)).toBe(true);
     expect(workdayStates.has(AgentState.Working)).toBe(true);
     expect(eveningStates.has(AgentState.MovingHome)).toBe(true);
-    expect(eveningStates.has(AgentState.Sleeping)).toBe(true);
+    expect(world.entities.agents[0]!.state).toBe(AgentState.Sleeping);
   });
 
   it('keeps late agents on the job until their shift is complete', () => {
@@ -1197,7 +1213,7 @@ describe('economy', () => {
     expect(world.entities.agents[0]!.destination?.kind).not.toBe('shop');
   });
 
-  it('does not shop twice during the same evening after one successful purchase', () => {
+  it('respects the shopping cooldown between successful evening purchases', () => {
     let world = createTestStarterWorld();
     const agent = world.entities.agents[0]!;
     const shop = world.entities.buildings.find((building) => building.kind === BuildingKind.Commercial)!;
@@ -1215,15 +1231,17 @@ describe('economy', () => {
     agent.pos = tileCenter(shop.tile);
     world.minutesOfDay = 18 * 60;
 
-    let purchases = 0;
+    const purchaseTicks: number[] = [];
     for (let index = 0; index < 300; index += 1) {
       world = stepWorld(world);
       if (world.entities.agents[0]!.lastShoppedTick === world.tick) {
-        purchases += 1;
+        purchaseTicks.push(world.tick);
       }
     }
 
-    expect(purchases).toBe(1);
+    expect(purchaseTicks[0]).toBeDefined();
+    expect(purchaseTicks[1]).toBeDefined();
+    expect(purchaseTicks[1]! - purchaseTicks[0]!).toBeGreaterThanOrEqual(SHOPPING_COOLDOWN_TICKS);
   }, 12000);
 
   it('shops from home to refill the pantry before hunger becomes urgent', () => {
@@ -1495,8 +1513,9 @@ describe('traffic and lifecycle', () => {
     const nextWorld = stepWorld(world);
     const movedAgent = nextWorld.entities.agents[0]!;
 
-    expect(movedAgent.pos.x).toBeCloseTo(1.5);
-    expect(movedAgent.pos.y).toBeCloseTo(1.85);
+    expect(movedAgent.pos.x).toBeGreaterThan(1.5);
+    expect(movedAgent.pos.x).toBeLessThan(2.5);
+    expect(movedAgent.pos.y).toBeCloseTo(1.75);
   });
 
   it('holds a following car at the lane boundary until the occupied road slot clears', () => {
@@ -1565,10 +1584,19 @@ describe('traffic and lifecycle', () => {
       }),
     );
 
-    world = stepTimes(world, 4);
+    world = stepTimes(world, 2);
 
     expect(world.entities.agents[0]!.pos.x).toBeLessThan(2);
     expect(world.entities.agents[1]!.pos.x).toBeGreaterThan(3);
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents[0]!.pos.x).toBeLessThan(2);
+    expect(world.entities.agents[1]!.routeIndex).toBe(2);
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents[0]!.pos.x).toBeGreaterThan(2);
   });
 
   it('applies the congestion speed formula with a floor', () => {

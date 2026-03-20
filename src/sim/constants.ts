@@ -15,7 +15,7 @@ export const SLEEP_TARGET_ENERGY = 85;
 export const SLEEP_ENERGY_RECOVERY_PER_TICK = 0.45;
 
 export const BASE_MOVE_SPEED = 0.1;
-export const ROAD_SPEED_MULTIPLIER = 2;
+export const ROAD_SPEED_MULTIPLIER = 5;
 export const ROAD_CAPACITY = 4;
 export const MIN_SPEED_FACTOR = 0.2;
 
