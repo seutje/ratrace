@@ -133,7 +133,7 @@ At midnight the simulation performs long-horizon lifecycle updates.
 - Agents that remain at maximum hunger for too many consecutive days are removed from the city.
 - If housing capacity is available, a residential household can add one new resident per day when:
   - two qualifying residents of opposite sexes live in the home
-  - they have enough cash
+  - they each have at least `$100` and spend it when the household grows
   - happiness is high enough
   - recent hardship and unpaid work stay below the cutoff
 - New residents inherit blended traits from their parents, receive deterministic names, join the household, and are assigned a job and shift.

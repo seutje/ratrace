@@ -1794,6 +1794,64 @@ describe('traffic and lifecycle', () => {
     expect(next.economy.treasury).toBe(world.economy.treasury + HOUSEHOLD_GROWTH_COST * 2);
   });
 
+  it('allows household growth when each parent has exactly $100', () => {
+    const world = createBlankWorld(4, 1);
+    setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Industrial, buildingId: 'work' });
+    world.entities.buildings.push(
+      {
+        id: 'home',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 0 },
+        cash: 0,
+        stock: 0,
+        capacity: 3,
+        pantryStock: 6,
+        pantryCapacity: 6,
+        label: 'home',
+      },
+      {
+        id: 'work',
+        kind: BuildingKind.Industrial,
+        tile: { x: 1, y: 0 },
+        cash: INDUSTRIAL_STARTING_CASH,
+        stock: 0,
+        capacity: 3,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'work',
+      },
+    );
+    world.metrics.populationCapacity = 3;
+    world.entities.agents = [
+      makeTestAgent({
+        id: 'agent-1',
+        sex: AgentSex.Female,
+        homeId: 'home',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 0 }),
+        wallet: 100,
+        stats: { hunger: 10, energy: 90, happiness: 80 },
+      }),
+      makeTestAgent({
+        id: 'agent-2',
+        sex: AgentSex.Male,
+        homeId: 'home',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 0 }),
+        wallet: 100,
+        stats: { hunger: 10, energy: 90, happiness: 80 },
+      }),
+    ];
+    world.minutesOfDay = 23 * 60 + 59;
+
+    const next = stepWorld(world);
+
+    expect(next.entities.agents).toHaveLength(3);
+    expect(next.entities.agents[0]!.wallet).toBe(0);
+    expect(next.entities.agents[1]!.wallet).toBe(0);
+  });
+
   it('blocks household growth for same-sex households', () => {
     const world = createBlankWorld(4, 1);
     setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });
