@@ -21,6 +21,7 @@ const toSnapshot = (world: WorldState): WorldDynamicSnapshot => ({
     posX: new Float32Array(world.entities.agents.map((agent) => agent.pos.x)),
     posY: new Float32Array(world.entities.agents.map((agent) => agent.pos.y)),
     stateCodes: new Uint8Array(world.entities.agents.length),
+    walletValues: new Float32Array(world.entities.agents.map((agent) => agent.wallet)),
   },
   metrics: { ...world.metrics },
   minutesOfDay: world.minutesOfDay,

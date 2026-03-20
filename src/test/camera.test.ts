@@ -24,6 +24,7 @@ describe('camera helpers', () => {
         posX: new Float32Array([agent.pos.x + 4]),
         posY: new Float32Array([agent.pos.y + 8]),
         stateCodes: new Uint8Array([0]),
+        walletValues: new Float32Array([agent.wallet]),
       },
       previousFrame: {
         energyValues: new Float32Array([agent.stats.energy]),
@@ -32,6 +33,7 @@ describe('camera helpers', () => {
         posX: new Float32Array([agent.pos.x]),
         posY: new Float32Array([agent.pos.y]),
         stateCodes: new Uint8Array([0]),
+        walletValues: new Float32Array([agent.wallet]),
       },
     });
 

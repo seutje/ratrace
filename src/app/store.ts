@@ -74,6 +74,7 @@ const createCompactAgentFrame = (world: WorldState): CompactAgentFrame => {
   const energyValues = new Float32Array(agentCount);
   const happinessValues = new Float32Array(agentCount);
   const stateCodes = new Uint8Array(agentCount);
+  const walletValues = new Float32Array(agentCount);
 
   world.entities.agents.forEach((agent, index) => {
     posX[index] = agent.pos.x;
@@ -82,6 +83,7 @@ const createCompactAgentFrame = (world: WorldState): CompactAgentFrame => {
     energyValues[index] = agent.stats.energy;
     happinessValues[index] = agent.stats.happiness;
     stateCodes[index] = Math.max(0, agentStateByCode.indexOf(agent.state));
+    walletValues[index] = agent.wallet;
   });
 
   return {
@@ -91,6 +93,7 @@ const createCompactAgentFrame = (world: WorldState): CompactAgentFrame => {
     posX,
     posY,
     stateCodes,
+    walletValues,
   };
 };
 
@@ -178,7 +181,23 @@ const applyDynamicSnapshotToWorld = (world: WorldState, snapshot: WorldDynamicSn
     day: snapshot.day,
     economy: { ...snapshot.economy },
     entities: {
-      agents: world.entities.agents,
+      agents: world.entities.agents.map((agent, index) => ({
+        ...agent,
+        pos: {
+          x: index < snapshot.frame.posX.length ? snapshot.frame.posX[index]! : agent.pos.x,
+          y: index < snapshot.frame.posY.length ? snapshot.frame.posY[index]! : agent.pos.y,
+        },
+        state: agentStateByCode[snapshot.frame.stateCodes[index]!] ?? agent.state,
+        stats: {
+          energy: index < snapshot.frame.energyValues.length ? snapshot.frame.energyValues[index]! : agent.stats.energy,
+          happiness:
+            index < snapshot.frame.happinessValues.length
+              ? snapshot.frame.happinessValues[index]!
+              : agent.stats.happiness,
+          hunger: index < snapshot.frame.hungerValues.length ? snapshot.frame.hungerValues[index]! : agent.stats.hunger,
+        },
+        wallet: index < snapshot.frame.walletValues.length ? snapshot.frame.walletValues[index]! : agent.wallet,
+      })),
       buildings: snapshot.entities.buildings.map((building) => ({
         ...building,
         tile: { ...building.tile },

@@ -72,6 +72,7 @@ export type CompactAgentFrame = {
   posX: Float32Array;
   posY: Float32Array;
   stateCodes: Uint8Array;
+  walletValues: Float32Array;
 };
 
 export type WorldDynamicSnapshot = {

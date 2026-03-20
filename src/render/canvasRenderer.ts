@@ -255,14 +255,24 @@ const renderWalletOverlay = (
     return;
   }
 
-  const maxWallet = Math.max(1, ...world.entities.agents.map((agent) => agent.wallet));
-  const rankedAgents = [...world.entities.agents]
-    .sort((left, right) => right.wallet - left.wallet || left.name.localeCompare(right.name))
+  const getWalletValue = (index: number) =>
+    getFrameValue(currentFrame?.walletValues, index, world.entities.agents[index]!.wallet);
+  const maxWallet = Math.max(1, ...world.entities.agents.map((_agent, index) => getWalletValue(index)));
+  const rankedAgentIndices = world.entities.agents
+    .map((_agent, index) => index)
+    .sort((left, right) => {
+      const walletDelta = getWalletValue(right) - getWalletValue(left);
+      if (walletDelta !== 0) {
+        return walletDelta;
+      }
+
+      return world.entities.agents[left]!.name.localeCompare(world.entities.agents[right]!.name);
+    })
     .slice(0, 5);
-  const leaderIds = new Set(rankedAgents.map((agent) => agent.id));
+  const leaderIndices = new Set(rankedAgentIndices);
 
   for (const [index, agent] of world.entities.agents.entries()) {
-    const wealthRatio = clamp01(agent.wallet / maxWallet);
+    const wealthRatio = clamp01(getWalletValue(index) / maxWallet);
     if (wealthRatio <= 0.05) {
       continue;
     }
@@ -271,7 +281,7 @@ const renderWalletOverlay = (
     const posY = getFrameValue(currentFrame?.posY, index, agent.pos.y);
     const x = viewport.offsetX + posX * viewport.tileSize;
     const y = viewport.offsetY + posY * viewport.tileSize;
-    const isLeader = leaderIds.has(agent.id);
+    const isLeader = leaderIndices.has(index);
 
     ctx.beginPath();
     ctx.arc(x, y, viewport.tileSize * (0.24 + wealthRatio * 0.42), 0, Math.PI * 2);
@@ -290,17 +300,13 @@ const renderWalletOverlay = (
   }
 
   ctx.font = "600 12px ui-monospace, 'SFMono-Regular', monospace";
-  for (const [rank, agent] of rankedAgents.entries()) {
-    const index = world.entities.agents.findIndex((entry) => entry.id === agent.id);
-    if (index < 0) {
-      continue;
-    }
-
+  for (const [rank, index] of rankedAgentIndices.entries()) {
+    const agent = world.entities.agents[index]!;
     const posX = getFrameValue(currentFrame?.posX, index, agent.pos.x);
     const posY = getFrameValue(currentFrame?.posY, index, agent.pos.y);
     const x = viewport.offsetX + posX * viewport.tileSize;
     const y = viewport.offsetY + posY * viewport.tileSize;
-    const label = `${rank + 1}. ${agent.name} $${agent.wallet}`;
+    const label = `${rank + 1}. ${agent.name} $${Math.round(getWalletValue(index))}`;
     const width = walletLabelWidth(label);
     const labelX = Math.round(x - width / 2);
     const labelY = Math.round(y - viewport.tileSize * 0.95 - rank * 2);

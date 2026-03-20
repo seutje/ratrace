@@ -17,6 +17,7 @@ let world = createStarterWorld();
 let paused = false;
 let tickTimer: number | null = null;
 let lastPublishedAgentCount = world.entities.agents.length;
+let lastPublishedAgentIds = world.entities.agents.map((agent) => agent.id);
 
 const agentStateCodeByValue = new Map(agentStateOrder.map((state, index) => [state, index]));
 
@@ -28,6 +29,7 @@ const createCompactAgentFrame = (): CompactAgentFrame => {
   const energyValues = new Float32Array(agentCount);
   const happinessValues = new Float32Array(agentCount);
   const stateCodes = new Uint8Array(agentCount);
+  const walletValues = new Float32Array(agentCount);
 
   world.entities.agents.forEach((agent, index) => {
     posX[index] = agent.pos.x;
@@ -36,6 +38,7 @@ const createCompactAgentFrame = (): CompactAgentFrame => {
     energyValues[index] = agent.stats.energy;
     happinessValues[index] = agent.stats.happiness;
     stateCodes[index] = agentStateCodeByValue.get(agent.state) ?? 0;
+    walletValues[index] = agent.wallet;
   });
 
   return {
@@ -45,11 +48,17 @@ const createCompactAgentFrame = (): CompactAgentFrame => {
     posX,
     posY,
     stateCodes,
+    walletValues,
   };
 };
 
+const hasAgentRosterChangedSinceLastPublish = () =>
+  world.entities.agents.length !== lastPublishedAgentIds.length ||
+  world.entities.agents.some((agent, index) => agent.id !== lastPublishedAgentIds[index]);
+
 const publishFullSnapshot = () => {
   lastPublishedAgentCount = world.entities.agents.length;
+  lastPublishedAgentIds = world.entities.agents.map((agent) => agent.id);
   const message: SimulationWorkerOutboundMessage = {
     type: 'fullSnapshot',
     world,
@@ -59,7 +68,7 @@ const publishFullSnapshot = () => {
 };
 
 const publishDynamicSnapshot = () => {
-  if (world.entities.agents.length !== lastPublishedAgentCount) {
+  if (world.entities.agents.length !== lastPublishedAgentCount || hasAgentRosterChangedSinceLastPublish()) {
     publishFullSnapshot();
     return;
   }
@@ -101,6 +110,7 @@ const publishDynamicSnapshot = () => {
     frame.energyValues.buffer,
     frame.happinessValues.buffer,
     frame.stateCodes.buffer,
+    frame.walletValues.buffer,
   ]);
 };
 
