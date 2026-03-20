@@ -1,4 +1,5 @@
-import { AgentSex, AgentState } from '../sim/types';
+import { useMemo } from 'react';
+import { AgentSex, AgentState, Agent, Building } from '../sim/types';
 import { useWorldStore } from '../app/store';
 import { buttonClass, cx, labelClass, panelClass, panelHeadingClass, selectedButtonClass } from './styles';
 
@@ -28,11 +29,42 @@ type RelationshipEntry = {
   name: string;
 };
 
+type InspectableAgent = Pick<Agent, 'homeId' | 'workId'>;
+
+const EMPTY_ENTRIES: RelationshipEntry[] = [];
+
 const getRelationshipEntries = (agentIds: string[], namesById: Map<string, string>) =>
   Array.from(new Set(agentIds)).map((agentId) => ({
     id: agentId,
     name: namesById.get(agentId) ?? agentId,
   }));
+
+const getAgentBuildings = (buildings: Building[] | undefined, agent: InspectableAgent | undefined) => {
+  if (!buildings || !agent) {
+    return {
+      home: undefined,
+      work: undefined,
+    };
+  }
+
+  let home: Building | undefined;
+  let work: Building | undefined;
+
+  for (const building of buildings) {
+    if (!home && building.id === agent.homeId) {
+      home = building;
+    }
+    if (!work && building.id === agent.workId) {
+      work = building;
+    }
+
+    if (home && work) {
+      break;
+    }
+  }
+
+  return { home, work };
+};
 
 const RelationshipList = ({
   entries,
@@ -66,28 +98,79 @@ const RelationshipList = ({
 export const Inspector = ({ followActive, onFollowToggle }: InspectorProps) => {
   const selectedAgentId = useWorldStore((state) => state.world.selectedAgentId);
   const selectedAgentSnapshot = useWorldStore((state) => state.selectedAgentSnapshot);
-  const worldAgents = useWorldStore((state) => state.world.entities.agents);
-  const buildings = useWorldStore((state) => state.world.entities.buildings);
-  const selectAgent = useWorldStore((state) => state.selectAgent);
-  const agent = useWorldStore((state) =>
-    selectedAgentSnapshot?.id === selectedAgentId
-      ? selectedAgentSnapshot
-      : state.world.entities.agents.find((entry) => entry.id === selectedAgentId),
+  const worldAgents = useWorldStore((state) =>
+    state.world.selectedAgentId !== undefined ? state.world.entities.agents : undefined,
   );
-  const buildingsById = new Map(buildings.map((building) => [building.id, building]));
-  const agentNamesById = new Map(worldAgents.map((entry) => [entry.id, entry.name]));
-  const home = agent ? buildingsById.get(agent.homeId) : undefined;
+  const buildings = useWorldStore((state) =>
+    state.world.selectedAgentId !== undefined ? state.world.entities.buildings : undefined,
+  );
+  const selectAgent = useWorldStore((state) => state.selectAgent);
+
+  const agentIndexes = useMemo(() => {
+    if (!worldAgents) {
+      return {
+        agentNamesById: new Map<string, string>(),
+        residentsByHomeId: new Map<string, RelationshipEntry[]>(),
+      };
+    }
+
+    const agentNamesById = new Map<string, string>();
+    const residentsByHomeId = new Map<string, RelationshipEntry[]>();
+
+    for (const worldAgent of worldAgents) {
+      agentNamesById.set(worldAgent.id, worldAgent.name);
+      const residents = residentsByHomeId.get(worldAgent.homeId);
+      const entry = { id: worldAgent.id, name: worldAgent.name };
+
+      if (residents) {
+        residents.push(entry);
+      } else {
+        residentsByHomeId.set(worldAgent.homeId, [entry]);
+      }
+    }
+
+    for (const residents of residentsByHomeId.values()) {
+      residents.sort((left, right) => left.name.localeCompare(right.name));
+    }
+
+    return {
+      agentNamesById,
+      residentsByHomeId,
+    };
+  }, [worldAgents]);
+
+  const agent = useMemo(
+    () =>
+      selectedAgentSnapshot?.id === selectedAgentId
+        ? selectedAgentSnapshot
+        : selectedAgentId !== undefined
+          ? worldAgents?.find((entry) => entry.id === selectedAgentId)
+          : undefined,
+    [selectedAgentId, selectedAgentSnapshot, worldAgents],
+  );
+  const { home, work } = useMemo(() => getAgentBuildings(buildings, agent), [agent, buildings]);
   const homeLabel = home?.label ?? 'None';
-  const workLabel = agent ? buildingsById.get(agent.workId)?.label ?? 'None' : 'None';
-  const roommates = agent
-    ? worldAgents
-        .filter((entry) => entry.homeId === agent.homeId && entry.id !== agent.id)
-        .map((entry) => ({ id: entry.id, name: entry.name }))
-        .sort((left, right) => left.name.localeCompare(right.name))
-    : [];
-  const parents = agent ? getRelationshipEntries(agent.parentIds, agentNamesById) : [];
-  const children = agent ? getRelationshipEntries(agent.childIds, agentNamesById) : [];
-  const coParents = agent ? getRelationshipEntries(agent.coParentIds, agentNamesById) : [];
+  const workLabel = work?.label ?? 'None';
+  const roommates = useMemo(() => {
+    if (!agent) {
+      return EMPTY_ENTRIES;
+    }
+
+    const residents = agentIndexes.residentsByHomeId.get(agent.homeId);
+    return residents ? residents.filter((entry) => entry.id !== agent.id) : EMPTY_ENTRIES;
+  }, [agent, agentIndexes]);
+  const parents = useMemo(
+    () => (agent ? getRelationshipEntries(agent.parentIds, agentIndexes.agentNamesById) : EMPTY_ENTRIES),
+    [agent, agentIndexes],
+  );
+  const children = useMemo(
+    () => (agent ? getRelationshipEntries(agent.childIds, agentIndexes.agentNamesById) : EMPTY_ENTRIES),
+    [agent, agentIndexes],
+  );
+  const coParents = useMemo(
+    () => (agent ? getRelationshipEntries(agent.coParentIds, agentIndexes.agentNamesById) : EMPTY_ENTRIES),
+    [agent, agentIndexes],
+  );
 
   return (
     <section className={`${panelClass} grid gap-3`}>
