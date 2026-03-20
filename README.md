@@ -127,7 +127,7 @@ The economy is intentionally small and mechanical rather than market-sim heavy.
 - Also once per hour, the treasury can subsidize businesses that are below their target cash level, but only when treasury reserves are above the configured reserve target.
 - Subsidy priority is based on which businesses have the weakest payroll runway, so near-failing employers are topped up first.
 
-Economy totals are recomputed from treasury cash, agent wallets, business cash, and stored goods. The result is a closed-loop toy economy where money circulates through wages, retail, wholesale transfers, taxes, and subsidies.
+Economy totals are recomputed from treasury cash, agent wallets, business cash, and stored goods. The result is a closed-loop toy economy where money circulates through wages, retail, wholesale transfers, taxes, subsidies, and death inheritance.
 
 ### Population turnover and household growth
 
@@ -139,6 +139,7 @@ At midnight the simulation performs long-horizon lifecycle updates.
 - Agents track whether they spent the day at maximum hunger.
 - Repeated full-hunger days increase hardship memory.
 - Agents that remain at maximum hunger for too many consecutive days are removed from the city.
+- When an agent dies, their wallet stays in the economy: surviving co-parents inherit first, then surviving children. Inherited estates pay a `15%` inheritance tax to the treasury, and estates with no living family go entirely to the treasury.
 - Every death is recorded in the left-side `Obituary` drawer, including a visible entry count plus the cause, day, and age at death.
 - Isolated residents, and residents stuck in same-sex-only roommate households, can relocate into occupied homes with spare room, with relocation preferring households that create mixed-sex living arrangements and immediate growth opportunities.
 - If housing capacity is available, a residential household can add one new resident per day when:

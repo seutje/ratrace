@@ -68,6 +68,50 @@ const stepTimes = (world: WorldState, ticks: number) => {
 
 const createTestStarterWorld = () => createStarterWorld(undefined, TEST_STARTER_POPULATION);
 
+const createPopulationTurnoverTestWorld = () => {
+  const world = createBlankWorld(2, 2);
+  setTile(world, { x: 0, y: 0 }, { x: 0, y: 0, type: TileType.Residential, buildingId: 'home' });
+  setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Residential, buildingId: 'home-b' });
+  setTile(world, { x: 0, y: 1 }, { x: 0, y: 1, type: TileType.Industrial, buildingId: 'work' });
+  world.entities.buildings.push(
+    {
+      id: 'home',
+      kind: BuildingKind.Residential,
+      tile: { x: 0, y: 0 },
+      cash: 0,
+      stock: 0,
+      capacity: 3,
+      pantryStock: 6,
+      pantryCapacity: 6,
+      label: 'home',
+    },
+    {
+      id: 'home-b',
+      kind: BuildingKind.Residential,
+      tile: { x: 1, y: 0 },
+      cash: 0,
+      stock: 0,
+      capacity: 3,
+      pantryStock: 6,
+      pantryCapacity: 6,
+      label: 'home-b',
+    },
+    {
+      id: 'work',
+      kind: BuildingKind.Industrial,
+      tile: { x: 0, y: 1 },
+      cash: INDUSTRIAL_STARTING_CASH,
+      stock: 0,
+      capacity: 6,
+      pantryStock: 0,
+      pantryCapacity: 0,
+      label: 'work',
+    },
+  );
+  world.metrics.populationCapacity = 6;
+  return world;
+};
+
 const orthogonalNeighbors = ({ x, y }: { x: number; y: number }) => [
   { x: x + 1, y },
   { x: x - 1, y },
@@ -1710,6 +1754,122 @@ describe('traffic and lifecycle', () => {
       cause: 'old_age',
       day: 2,
     });
+  });
+
+  it('passes a dead agent wallet to a surviving co-parent after a 15% inheritance tax', () => {
+    let world = createPopulationTurnoverTestWorld();
+    world.entities.agents = [
+      makeTestAgent({
+        id: 'deceased',
+        age: MAX_AGENT_AGE - 1,
+        wallet: 41,
+        childIds: ['child'],
+        coParentIds: ['spouse'],
+      }),
+      makeTestAgent({
+        id: 'spouse',
+        name: 'Spouse Agent',
+        sex: AgentSex.Male,
+        wallet: 10,
+        childIds: ['child'],
+        coParentIds: ['deceased'],
+      }),
+      makeTestAgent({
+        id: 'child',
+        name: 'Child Agent',
+        age: 10,
+        wallet: 5,
+        parentIds: ['deceased', 'spouse'],
+      }),
+    ];
+    world.minutesOfDay = 23 * 60 + 59;
+    const initialTreasury = world.economy.treasury;
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents.find((agent) => agent.id === 'spouse')?.wallet).toBe(45);
+    expect(world.entities.agents.find((agent) => agent.id === 'child')?.wallet).toBe(5);
+    expect(world.economy.treasury).toBe(initialTreasury + 6);
+  });
+
+  it('passes a dead agent wallet to living children after a 15% inheritance tax when no co-parent survives', () => {
+    let world = createPopulationTurnoverTestWorld();
+    world.entities.agents = [
+      makeTestAgent({
+        id: 'deceased',
+        age: MAX_AGENT_AGE - 1,
+        wallet: 41,
+        childIds: ['child-a', 'child-b'],
+        coParentIds: ['spouse'],
+      }),
+      makeTestAgent({
+        id: 'spouse',
+        name: 'Spouse Agent',
+        sex: AgentSex.Male,
+        age: MAX_AGENT_AGE - 1,
+        wallet: 13,
+        childIds: ['child-a', 'child-b'],
+        coParentIds: ['deceased'],
+      }),
+      makeTestAgent({
+        id: 'child-a',
+        name: 'Child A',
+        age: 10,
+        wallet: 5,
+        parentIds: ['deceased', 'spouse'],
+      }),
+      makeTestAgent({
+        id: 'child-b',
+        name: 'Child B',
+        age: 12,
+        wallet: 7,
+        parentIds: ['deceased', 'spouse'],
+      }),
+    ];
+    world.minutesOfDay = 23 * 60 + 59;
+    const initialTreasury = world.economy.treasury;
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents.find((agent) => agent.id === 'child-a')?.wallet).toBe(29);
+    expect(world.entities.agents.find((agent) => agent.id === 'child-b')?.wallet).toBe(30);
+    expect(world.economy.treasury).toBe(initialTreasury + 7);
+  });
+
+  it('returns a dead agent wallet to the treasury when no family survives', () => {
+    let world = createPopulationTurnoverTestWorld();
+    world.entities.agents = [
+      makeTestAgent({
+        id: 'deceased',
+        age: MAX_AGENT_AGE - 1,
+        wallet: 41,
+        childIds: ['child'],
+        coParentIds: ['spouse'],
+      }),
+      makeTestAgent({
+        id: 'spouse',
+        name: 'Spouse Agent',
+        sex: AgentSex.Male,
+        age: MAX_AGENT_AGE - 1,
+        wallet: 13,
+        childIds: ['child'],
+        coParentIds: ['deceased'],
+      }),
+      makeTestAgent({
+        id: 'child',
+        name: 'Child Agent',
+        age: MAX_AGENT_AGE - 1,
+        wallet: 5,
+        parentIds: ['deceased', 'spouse'],
+      }),
+    ];
+    world.minutesOfDay = 23 * 60 + 59;
+    const initialTreasury = world.economy.treasury;
+
+    world = stepWorld(world);
+
+    expect(world.entities.agents).toHaveLength(0);
+    expect(world.economy.treasury).toBe(initialTreasury + 41 + 13 + 5);
   });
 
   it('grows a household when two residents can afford it and housing is available', () => {

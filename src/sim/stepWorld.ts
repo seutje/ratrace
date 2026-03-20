@@ -6,6 +6,7 @@ import {
   HOUSEHOLD_GROWTH_COST,
   HOUSEHOLD_GROWTH_HAPPINESS_THRESHOLD,
   HOUSEHOLD_GROWTH_WALLET_THRESHOLD,
+  INHERITANCE_TAX_RATE,
   HOURLY_WAGE,
   INDUSTRIAL_OUTPUT_PER_HOUR,
   INDUSTRIAL_STARTING_CASH,
@@ -1716,6 +1717,63 @@ const createObituaryEntry = (agent: Agent, world: WorldState, cause: ObituaryEnt
   day: world.day,
 });
 
+const collectLivingRelationRecipients = (relationIds: string[], livingAgentsById: Map<string, Agent>) =>
+  Array.from(
+    relationIds.reduce((recipients, relationId) => {
+      const livingRelation = livingAgentsById.get(relationId);
+      if (livingRelation) {
+        recipients.set(livingRelation.id, livingRelation);
+      }
+      return recipients;
+    }, new Map<string, Agent>()),
+    ([, agent]) => agent,
+  );
+
+const distributeInheritance = (amount: number, recipients: Agent[]) => {
+  if (amount <= 0 || recipients.length === 0) {
+    return;
+  }
+
+  const orderedRecipients = recipients.slice().sort((left, right) => left.id.localeCompare(right.id));
+  const share = Math.floor(amount / orderedRecipients.length);
+  let remainder = amount % orderedRecipients.length;
+
+  for (const recipient of orderedRecipients) {
+    recipient.wallet += share;
+    if (remainder > 0) {
+      recipient.wallet += 1;
+      remainder -= 1;
+    }
+  }
+};
+
+const transferDeceasedWallet = (world: WorldState, deceasedAgent: Agent, livingAgentsById: Map<string, Agent>) => {
+  if (deceasedAgent.wallet <= 0) {
+    return;
+  }
+
+  const inheritanceTax = Math.floor(deceasedAgent.wallet * INHERITANCE_TAX_RATE);
+  const distributableEstate = deceasedAgent.wallet - inheritanceTax;
+  const livingCoParents = collectLivingRelationRecipients(deceasedAgent.coParentIds, livingAgentsById);
+  if (livingCoParents.length > 0) {
+    world.economy.treasury += inheritanceTax;
+    distributeInheritance(distributableEstate, livingCoParents);
+    deceasedAgent.wallet = 0;
+    return;
+  }
+
+  const livingChildren = collectLivingRelationRecipients(deceasedAgent.childIds, livingAgentsById);
+  if (livingChildren.length > 0) {
+    world.economy.treasury += inheritanceTax;
+    distributeInheritance(distributableEstate, livingChildren);
+    deceasedAgent.wallet = 0;
+    return;
+  }
+
+  world.economy.treasury += deceasedAgent.wallet;
+  deceasedAgent.wallet = 0;
+};
+
 const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingIndex) => {
   if (world.minutesOfDay !== 0) {
     return;
@@ -1733,6 +1791,7 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
   }
 
   const survivors: Agent[] = [];
+  const deceasedAgents: Agent[] = [];
   const obituaryEntries: ObituaryEntry[] = [];
 
   for (const agent of world.entities.agents) {
@@ -1744,11 +1803,17 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
           : undefined;
 
     if (cause) {
+      deceasedAgents.push(agent);
       obituaryEntries.push(createObituaryEntry(agent, world, cause));
       continue;
     }
 
     survivors.push(agent);
+  }
+
+  const survivorsById = new Map(survivors.map((agent) => [agent.id, agent]));
+  for (const deceasedAgent of deceasedAgents) {
+    transferDeceasedWallet(world, deceasedAgent, survivorsById);
   }
 
   world.entities.agents = survivors;
