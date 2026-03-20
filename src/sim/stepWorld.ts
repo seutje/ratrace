@@ -52,7 +52,6 @@ import {
 import { createRuntimeAgentName, getLastName } from './naming';
 import {
   clamp,
-  distance,
   formatClock,
   getTile,
   samePoint,
@@ -91,6 +90,14 @@ type StepBuildingIndex = {
   commercial: Building[];
   industrial: Building[];
 };
+type StepScratch = {
+  buildingIndex: StepBuildingIndex;
+  buildingIndexBuildings: Building[] | null;
+  buildingIndexMapVersion: number;
+  reservations: OccupancyReservations;
+  shopSearchState: ShopSearchState;
+  staffedCommercialCounts: StaffedCommercialCounts;
+};
 
 const getRetailPrice = (units: number) => units * SHOP_PRICE_PER_UNIT;
 const getRetailSalesTax = (units: number) => units * RETAIL_SALES_TAX_PER_UNIT;
@@ -123,33 +130,44 @@ const cloneWorldForStep = (world: WorldState): WorldState => ({
   metrics: { ...world.metrics },
 });
 
-const createBuildingIndex = (world: WorldState): StepBuildingIndex => {
-  const byId = new Map<string, Building>();
-  const residential: Building[] = [];
-  const commercial: Building[] = [];
-  const industrial: Building[] = [];
+const clearBuildingIndex = (buildingIndex: StepBuildingIndex) => {
+  buildingIndex.byId.clear();
+  buildingIndex.residential.length = 0;
+  buildingIndex.commercial.length = 0;
+  buildingIndex.industrial.length = 0;
+};
+
+const rebuildBuildingIndex = (buildingIndex: StepBuildingIndex, world: WorldState) => {
+  clearBuildingIndex(buildingIndex);
 
   for (const building of world.entities.buildings) {
-    byId.set(building.id, building);
+    buildingIndex.byId.set(building.id, building);
     switch (building.kind) {
       case BuildingKind.Residential:
-        residential.push(building);
+        buildingIndex.residential.push(building);
         break;
       case BuildingKind.Commercial:
-        commercial.push(building);
+        buildingIndex.commercial.push(building);
         break;
       case BuildingKind.Industrial:
-        industrial.push(building);
+        buildingIndex.industrial.push(building);
         break;
     }
   }
+};
 
-  return {
-    byId,
-    residential,
-    commercial,
-    industrial,
-  };
+const getBuildingIndex = (world: WorldState, scratch: StepScratch): StepBuildingIndex => {
+  if (
+    scratch.buildingIndexBuildings === world.entities.buildings &&
+    scratch.buildingIndexMapVersion === world.metrics.mapVersion
+  ) {
+    return scratch.buildingIndex;
+  }
+
+  rebuildBuildingIndex(scratch.buildingIndex, world);
+  scratch.buildingIndexBuildings = world.entities.buildings;
+  scratch.buildingIndexMapVersion = world.metrics.mapVersion;
+  return scratch.buildingIndex;
 };
 
 const allowsAgentOverlap = (tileType: TileType) => overlapAllowedTileTypes.has(tileType);
@@ -303,8 +321,15 @@ const getBuildingsByKind = (buildingIndex: StepBuildingIndex, kind: BuildingKind
   }
 };
 
+const clearTraffic = (traffic: Record<string, number>) => {
+  for (const key in traffic) {
+    delete traffic[key];
+  }
+};
+
 const computeTraffic = (world: WorldState) => {
-  const traffic: Record<string, number> = {};
+  const traffic = world.traffic;
+  clearTraffic(traffic);
   let trafficPeak = 0;
 
   for (const agent of world.entities.agents) {
@@ -318,7 +343,6 @@ const computeTraffic = (world: WorldState) => {
     }
   }
 
-  world.traffic = traffic;
   world.metrics.trafficPeak = trafficPeak;
 };
 
@@ -347,18 +371,26 @@ const updateEconomyTotals = (world: WorldState) => {
 
 const isOrthogonallyAdjacent = (from: Point, to: Point) => Math.abs(from.x - to.x) + Math.abs(from.y - to.y) === 1;
 
-const isRouteTraversable = (world: WorldState, path: Point[]) => {
-  for (let index = 0; index < path.length; index += 1) {
-    const point = path[index]!;
+const isRouteTraversable = (
+  world: WorldState,
+  currentTile: Point,
+  route: Point[],
+  routeIndex: number,
+) => {
+  let previousPoint = currentTile;
+
+  for (let index = routeIndex; index < route.length; index += 1) {
+    const point = route[index]!;
     const tile = getTile(world, point);
     if (!tile || tile.type === TileType.Blocked) {
       return false;
     }
 
-    const previousPoint = path[index - 1];
-    if (previousPoint && !isOrthogonallyAdjacent(previousPoint, point)) {
+    if (!isOrthogonallyAdjacent(previousPoint, point)) {
       return false;
     }
+
+    previousPoint = point;
   }
 
   return true;
@@ -379,7 +411,7 @@ const isCurrentRouteUsable = (world: WorldState, agent: Agent, targetPoint: Poin
     return false;
   }
 
-  return isRouteTraversable(world, [currentTile, ...agent.route.slice(agent.routeIndex)]);
+  return isRouteTraversable(world, currentTile, agent.route, agent.routeIndex);
 };
 
 type CommuteRouteKind = 'toWork' | 'toHome';
@@ -513,31 +545,32 @@ const moveAxisToward = (current: number, target: number, maxStep: number) => {
 };
 
 const moveTowardPoint = (agent: Agent, target: Point, stepDistance: number, direction?: ReturnType<typeof getLaneDirection>) => {
-  const remainingDistance = distance(agent.pos, target);
+  const remainingDistance = Math.hypot(target.x - agent.pos.x, target.y - agent.pos.y);
   if (remainingDistance <= stepDistance) {
-    agent.pos = target;
+    agent.pos.x = target.x;
+    agent.pos.y = target.y;
     return true;
   }
 
   if (direction === 'east' || direction === 'west') {
     const yMove = moveAxisToward(agent.pos.y, target.y, stepDistance);
     const xMove = moveAxisToward(agent.pos.x, target.x, stepDistance - yMove.used);
-    agent.pos = { x: xMove.value, y: yMove.value };
+    agent.pos.x = xMove.value;
+    agent.pos.y = yMove.value;
     return false;
   }
 
   if (direction === 'north' || direction === 'south') {
     const xMove = moveAxisToward(agent.pos.x, target.x, stepDistance);
     const yMove = moveAxisToward(agent.pos.y, target.y, stepDistance - xMove.used);
-    agent.pos = { x: xMove.value, y: yMove.value };
+    agent.pos.x = xMove.value;
+    agent.pos.y = yMove.value;
     return false;
   }
 
   const ratio = stepDistance / remainingDistance;
-  agent.pos = {
-    x: agent.pos.x + (target.x - agent.pos.x) * ratio,
-    y: agent.pos.y + (target.y - agent.pos.y) * ratio,
-  };
+  agent.pos.x += (target.x - agent.pos.x) * ratio;
+  agent.pos.y += (target.y - agent.pos.y) * ratio;
   return false;
 };
 
@@ -855,10 +888,28 @@ const invalidateShopSearchState = (shopSearchState: ShopSearchState) => {
   shopSearchState.nearestByTile.clear();
 };
 
-const initializeAgentStepState = (world: WorldState, buildingIndex: StepBuildingIndex) => {
+const createStepScratch = (): StepScratch => ({
+  buildingIndex: {
+    byId: new Map(),
+    residential: [],
+    commercial: [],
+    industrial: [],
+  },
+  buildingIndexBuildings: null,
+  buildingIndexMapVersion: -1,
+  reservations: new Map(),
+  shopSearchState: createShopSearchState(),
+  staffedCommercialCounts: new Map(),
+});
+
+const defaultStepScratch = createStepScratch();
+
+const initializeAgentStepState = (world: WorldState, buildingIndex: StepBuildingIndex, scratch: StepScratch) => {
   computeTraffic(world);
-  const reservations: OccupancyReservations = new Map();
-  const staffedCommercialCounts: StaffedCommercialCounts = new Map();
+  const reservations = scratch.reservations;
+  const staffedCommercialCounts = scratch.staffedCommercialCounts;
+  reservations.clear();
+  staffedCommercialCounts.clear();
 
   for (const agent of world.entities.agents) {
     const currentTile = getAgentCurrentTile(agent);
@@ -1452,8 +1503,9 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
 };
 
 export const stepWorldInPlace = (world: WorldState): WorldState => {
-  const buildingIndex = createBuildingIndex(world);
-  const shopSearchState = createShopSearchState();
+  const buildingIndex = getBuildingIndex(world, defaultStepScratch);
+  const shopSearchState = defaultStepScratch.shopSearchState;
+  invalidateShopSearchState(shopSearchState);
   world.tick += 1;
   world.minutesOfDay += gameMinutesPerTick;
 
@@ -1464,7 +1516,7 @@ export const stepWorldInPlace = (world: WorldState): WorldState => {
 
   subsidizeBusinesses(world, buildingIndex);
   restockCommercialBuildings(world, buildingIndex);
-  const { reservations, staffedCommercialCounts } = initializeAgentStepState(world, buildingIndex);
+  const { reservations, staffedCommercialCounts } = initializeAgentStepState(world, buildingIndex, defaultStepScratch);
   for (const agent of world.entities.agents) {
     updateAgentStats(agent);
     routeAgent(world, buildingIndex, staffedCommercialCounts, shopSearchState, agent, reservations);

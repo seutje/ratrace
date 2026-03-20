@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
-import { MAX_FRAME_ADVANCE_MS, STARTER_WORLD_SEED } from '../sim/constants';
+import { MAX_FRAME_ADVANCE_MS, STARTER_WORLD_SEED, msPerTick } from '../sim/constants';
 import { BuildMode, OverlayMode, WorldState } from '../sim/types';
 import {
   agentStateOrder,
@@ -36,7 +36,9 @@ type WorldStore = {
 let simulationWorker: Worker | null = null;
 let previousRenderSnapshot: WorldDynamicSnapshot | null = null;
 let currentRenderSnapshot: WorldDynamicSnapshot | null = null;
+let previousRenderSnapshotReceivedAtMs = 0;
 let currentRenderSnapshotReceivedAtMs = 0;
+let estimatedRenderSnapshotIntervalMs = 0;
 
 const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -98,9 +100,23 @@ const toDynamicSnapshot = (world: WorldState): WorldDynamicSnapshot => ({
 });
 
 const setRenderSnapshots = (nextSnapshot: WorldDynamicSnapshot) => {
+  previousRenderSnapshotReceivedAtMs = currentRenderSnapshotReceivedAtMs;
   previousRenderSnapshot = currentRenderSnapshot ?? nextSnapshot;
   currentRenderSnapshot = nextSnapshot;
   currentRenderSnapshotReceivedAtMs = nowMs();
+
+  const snapshotTickDelta = Math.max(1, currentRenderSnapshot.tick - previousRenderSnapshot.tick);
+  const tickIntervalMs = snapshotTickDelta * msPerTick;
+  const arrivalIntervalMs =
+    previousRenderSnapshotReceivedAtMs > 0
+      ? currentRenderSnapshotReceivedAtMs - previousRenderSnapshotReceivedAtMs
+      : tickIntervalMs;
+  const nextEstimateMs = Math.max(tickIntervalMs, arrivalIntervalMs);
+
+  estimatedRenderSnapshotIntervalMs =
+    estimatedRenderSnapshotIntervalMs > 0
+      ? estimatedRenderSnapshotIntervalMs * 0.7 + nextEstimateMs * 0.3
+      : nextEstimateMs;
 };
 
 const applyDynamicSnapshotToWorld = (world: WorldState, snapshot: WorldDynamicSnapshot): WorldState => {
@@ -172,7 +188,9 @@ export const startSimulationWorker = () => {
 export const stopSimulationWorker = () => {
   previousRenderSnapshot = null;
   currentRenderSnapshot = null;
+  previousRenderSnapshotReceivedAtMs = 0;
   currentRenderSnapshotReceivedAtMs = 0;
+  estimatedRenderSnapshotIntervalMs = 0;
   simulationWorker?.terminate();
   simulationWorker = null;
 };
@@ -180,7 +198,9 @@ export const stopSimulationWorker = () => {
 export const getRenderInterpolationState = () => ({
   current: currentRenderSnapshot,
   currentReceivedAtMs: currentRenderSnapshotReceivedAtMs,
+  estimatedIntervalMs: estimatedRenderSnapshotIntervalMs,
   previous: previousRenderSnapshot,
+  previousReceivedAtMs: previousRenderSnapshotReceivedAtMs,
 });
 
 export const useWorldStore = create<WorldStore>((set, get) => ({

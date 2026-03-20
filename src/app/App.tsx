@@ -61,6 +61,7 @@ const zoomIn = (zoom: number) => Math.min(MAX_ZOOM, zoom * 2);
 const zoomOut = (zoom: number) => Math.max(MIN_ZOOM, zoom / 2);
 const clampZoom = (zoom: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
 const DRAG_THRESHOLD_PX = 4;
+const MAX_INTERPOLATION_EXTRAPOLATION = 0.18;
 const appBackgroundStyle = {
   background:
     'radial-gradient(circle at top left, rgba(232, 180, 94, 0.4), transparent 24%), radial-gradient(circle at bottom right, rgba(63, 109, 161, 0.24), transparent 24%), linear-gradient(180deg, #f8eedb 0%, #e4cda2 100%)',
@@ -212,11 +213,22 @@ export const App = () => {
     let frame = 0;
 
     const drawWorld = (world: WorldState, frameTime: number) => {
-      const { previous, current, currentReceivedAtMs } = getRenderInterpolationState();
+      const { previous, current, currentReceivedAtMs, estimatedIntervalMs } = getRenderInterpolationState();
       const interpolationWindowMs =
-        previous && current ? Math.max(msPerTick, (current.tick - previous.tick) * msPerTick) : msPerTick;
+        previous && current
+          ? Math.max(
+              msPerTick,
+              (current.tick - previous.tick) * msPerTick,
+              estimatedIntervalMs || 0,
+            )
+          : msPerTick;
       const interpolationAlpha =
-        previous && current ? Math.max(0, Math.min(1, (frameTime - currentReceivedAtMs) / interpolationWindowMs)) : 1;
+        previous && current
+          ? Math.max(
+              0,
+              Math.min(1 + MAX_INTERPOLATION_EXTRAPOLATION, (frameTime - currentReceivedAtMs) / interpolationWindowMs),
+            )
+          : 1;
       const interpolation = {
         alpha: interpolationAlpha,
         currentFrame: current?.frame,
