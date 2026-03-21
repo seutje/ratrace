@@ -109,7 +109,7 @@ const toDynamicSnapshot = (world: WorldState): WorldDynamicSnapshot => ({
   frame: createCompactAgentFrame(world),
   metrics: { ...world.metrics },
   minutesOfDay: world.minutesOfDay,
-  obituary: world.obituary.map((entry) => ({ ...entry })),
+  obituaryCount: world.obituary.length,
   selectedAgent: world.selectedAgentId
     ? (() => {
         const agent = world.entities.agents.find((entry) => entry.id === world.selectedAgentId);
@@ -176,6 +176,13 @@ const setRenderSnapshots = (nextSnapshot: WorldDynamicSnapshot, options?: { rese
 };
 
 const applyDynamicSnapshotToWorld = (world: WorldState, snapshot: WorldDynamicSnapshot): WorldState => {
+  const buildings = snapshot.entities.buildings
+    ? snapshot.entities.buildings.map((building) => ({
+        ...building,
+        tile: { ...building.tile },
+      }))
+    : world.entities.buildings;
+
   return {
     ...world,
     day: snapshot.day,
@@ -198,18 +205,15 @@ const applyDynamicSnapshotToWorld = (world: WorldState, snapshot: WorldDynamicSn
         },
         wallet: index < snapshot.frame.walletValues.length ? snapshot.frame.walletValues[index]! : agent.wallet,
       })),
-      buildings: snapshot.entities.buildings.map((building) => ({
-        ...building,
-        tile: { ...building.tile },
-      })),
+      buildings,
     },
     metrics: { ...snapshot.metrics },
     minutesOfDay: snapshot.minutesOfDay,
-    obituary: snapshot.obituary.map((entry) => ({ ...entry })),
+    obituary: world.obituary,
     selectedAgentId: snapshot.selectedAgentId,
     selectedTile: snapshot.selectedTile ? { ...snapshot.selectedTile } : undefined,
     tick: snapshot.tick,
-    traffic: { ...snapshot.traffic },
+    traffic: snapshot.traffic ? { ...snapshot.traffic } : world.traffic,
   };
 };
 
@@ -232,7 +236,15 @@ const applyWorkerSnapshot = (message: SimulationWorkerOutboundMessage) => {
     ...state,
     carryMs: 0,
     selectedAgentSnapshot: message.snapshot.selectedAgent,
-    statisticsHistory: updateStatisticsHistory(state.statisticsHistory, sampleDynamicStatistics(message.snapshot)),
+    statisticsHistory: updateStatisticsHistory(
+      state.statisticsHistory,
+      sampleDynamicStatistics({
+        ...message.snapshot,
+        entities: {
+          buildings: message.snapshot.entities.buildings ?? state.world.entities.buildings,
+        },
+      }),
+    ),
     world: applyDynamicSnapshotToWorld(state.world, message.snapshot),
   }));
 };

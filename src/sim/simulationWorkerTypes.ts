@@ -4,7 +4,6 @@ import {
   Building,
   BuildMode,
   Economy,
-  ObituaryEntry,
   Point,
   TrafficMap,
   WorldMetrics,
@@ -79,17 +78,17 @@ export type WorldDynamicSnapshot = {
   day: number;
   economy: Economy;
   entities: {
-    buildings: DynamicBuildingSnapshot[];
+    buildings?: DynamicBuildingSnapshot[];
   };
   frame: CompactAgentFrame;
   metrics: WorldMetrics;
   minutesOfDay: number;
-  obituary: ObituaryEntry[];
+  obituaryCount: number;
   selectedAgent?: DynamicAgentSnapshot;
   selectedAgentId?: string;
   selectedTile?: Point;
   tick: number;
-  traffic: TrafficMap;
+  traffic?: TrafficMap;
 };
 
 export type SimulationWorkerInboundMessage =

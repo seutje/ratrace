@@ -3,6 +3,7 @@
 import { STARTER_WORLD_SEED, msPerTick, workerSnapshotIntervalTicks } from './constants';
 import { stepWorldInPlace } from './stepWorld';
 import {
+  DynamicBuildingSnapshot,
   agentStateOrder,
   CompactAgentFrame,
   SimulationWorkerInboundMessage,
@@ -18,8 +19,79 @@ let paused = false;
 let tickTimer: number | null = null;
 let lastPublishedAgentCount = world.entities.agents.length;
 let lastPublishedAgentIds = world.entities.agents.map((agent) => agent.id);
+let lastPublishedBuildingSnapshot: DynamicBuildingSnapshot[] | null = null;
+let lastPublishedTrafficSnapshot: Record<string, number> | null = null;
 
 const agentStateCodeByValue = new Map(agentStateOrder.map((state, index) => [state, index]));
+
+const cloneBuildingSnapshot = (buildings: typeof world.entities.buildings): DynamicBuildingSnapshot[] =>
+  buildings.map((building) => ({
+    ...building,
+    tile: { ...building.tile },
+  }));
+
+const haveBuildingsChangedSinceLastPublish = () => {
+  if (!lastPublishedBuildingSnapshot || lastPublishedBuildingSnapshot.length !== world.entities.buildings.length) {
+    return true;
+  }
+
+  return world.entities.buildings.some((building, index) => {
+    const published = lastPublishedBuildingSnapshot?.[index];
+    return !published ||
+      building.id !== published.id ||
+      building.kind !== published.kind ||
+      building.cash !== published.cash ||
+      building.stock !== published.stock ||
+      building.capacity !== published.capacity ||
+      building.pantryStock !== published.pantryStock ||
+      building.pantryCapacity !== published.pantryCapacity ||
+      building.label !== published.label ||
+      building.tile.x !== published.tile.x ||
+      building.tile.y !== published.tile.y;
+  });
+};
+
+const createChangedBuildingSnapshot = () => {
+  if (!haveBuildingsChangedSinceLastPublish()) {
+    return undefined;
+  }
+
+  const snapshot = cloneBuildingSnapshot(world.entities.buildings);
+  lastPublishedBuildingSnapshot = snapshot;
+  return snapshot;
+};
+
+const cloneTrafficSnapshot = () => ({ ...world.traffic });
+
+const haveTrafficChangedSinceLastPublish = () => {
+  if (!lastPublishedTrafficSnapshot) {
+    return true;
+  }
+
+  const currentKeys = Object.keys(world.traffic);
+  const publishedKeys = Object.keys(lastPublishedTrafficSnapshot);
+  if (currentKeys.length !== publishedKeys.length) {
+    return true;
+  }
+
+  for (const key of currentKeys) {
+    if (world.traffic[key] !== lastPublishedTrafficSnapshot[key]) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const createChangedTrafficSnapshot = () => {
+  if (!haveTrafficChangedSinceLastPublish()) {
+    return undefined;
+  }
+
+  const snapshot = cloneTrafficSnapshot();
+  lastPublishedTrafficSnapshot = snapshot;
+  return snapshot;
+};
 
 const createCompactAgentFrame = (): CompactAgentFrame => {
   const agentCount = world.entities.agents.length;
@@ -59,6 +131,8 @@ const hasAgentRosterChangedSinceLastPublish = () =>
 const publishFullSnapshot = () => {
   lastPublishedAgentCount = world.entities.agents.length;
   lastPublishedAgentIds = world.entities.agents.map((agent) => agent.id);
+  lastPublishedBuildingSnapshot = cloneBuildingSnapshot(world.entities.buildings);
+  lastPublishedTrafficSnapshot = cloneTrafficSnapshot();
   const message: SimulationWorkerOutboundMessage = {
     type: 'fullSnapshot',
     world,
@@ -74,6 +148,8 @@ const publishDynamicSnapshot = () => {
   }
 
   const frame = createCompactAgentFrame();
+  const buildings = createChangedBuildingSnapshot();
+  const traffic = createChangedTrafficSnapshot();
   const selectedAgent =
     world.selectedAgentId !== undefined
       ? world.entities.agents.find((agent) => agent.id === world.selectedAgentId)
@@ -82,20 +158,17 @@ const publishDynamicSnapshot = () => {
     day: world.day,
     economy: { ...world.economy },
     entities: {
-      buildings: world.entities.buildings.map((building) => ({
-        ...building,
-        tile: { ...building.tile },
-      })),
+      buildings,
     },
     frame,
     metrics: { ...world.metrics },
     minutesOfDay: world.minutesOfDay,
-    obituary: world.obituary.map((entry) => ({ ...entry })),
+    obituaryCount: world.obituary.length,
     selectedAgent: selectedAgent ? toDynamicAgentSnapshot(selectedAgent) : undefined,
     selectedAgentId: world.selectedAgentId,
     selectedTile: world.selectedTile ? { ...world.selectedTile } : undefined,
     tick: world.tick,
-    traffic: { ...world.traffic },
+    traffic,
   };
 
   const message: SimulationWorkerOutboundMessage = {

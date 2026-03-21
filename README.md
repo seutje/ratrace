@@ -60,7 +60,7 @@ Every tick runs the same ordered simulation pass in `stepWorldInPlace()`:
 5. At midnight, run population turnover, household consolidation, and household growth.
 6. Recalculate economy totals such as total wealth and global supply stock.
 
-The worker publishes either full snapshots or compact dynamic snapshots back to the UI, so rendering stays decoupled from the simulation state updates. The renderer interpolates only across compatible snapshots and resets interpolation on full snapshots, which prevents the follow camera from blending against stale agent indices after structural population changes. The UI also keeps a capped rolling statistics history sampled from those snapshots so the `Statistics` drawer can graph the city's recent trajectory without storing an unbounded trace.
+The worker publishes either full snapshots or compact dynamic snapshots back to the UI, so rendering stays decoupled from the simulation state updates. Dynamic snapshots always carry the transferable per-agent frame data and only include building or traffic payloads when those structures have actually changed; the obituary stays on full snapshots while dynamic updates send only the running death count. The renderer interpolates only across compatible snapshots and resets interpolation on full snapshots, which prevents the follow camera from blending against stale agent indices after structural population changes. The UI also keeps a capped rolling statistics history sampled from those snapshots so the `Statistics` drawer can graph the city's recent trajectory without storing an unbounded trace.
 
 ### Agents, needs, and daily routine
 
@@ -125,7 +125,7 @@ The economy is intentionally small and mechanical rather than market-sim heavy.
   - sales tax sent to the treasury
 - Once per hour, commercial buildings restock by purchasing wholesale inventory from industrial buildings.
 - Also once per hour, the treasury can subsidize businesses that are below their target cash level, but only when treasury reserves are above the configured reserve target.
-- Subsidy priority is based on which businesses have the weakest payroll runway, so near-failing employers are topped up first.
+- Subsidy priority is based on which businesses have the largest staffing-adjusted cash shortfall, with payroll runway used as a tiebreaker, so the most underfunded employers are topped up first.
 
 Economy totals are recomputed from treasury cash, agent wallets, business cash, and stored goods. The result is a closed-loop toy economy where money circulates through wages, retail, wholesale transfers, taxes, subsidies, and death inheritance.
 

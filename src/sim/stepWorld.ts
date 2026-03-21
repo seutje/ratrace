@@ -82,6 +82,7 @@ const overlapAllowedTileTypes = new Set<TileType>([
   TileType.Industrial,
 ]);
 const ROAD_RIGHT_OF_WAY_EPSILON = 1e-3;
+const BUSINESS_SUPPORT_RESERVE_DAYS = 10;
 type OccupancyReservations = Map<string, number>;
 type StaffedCommercialCounts = Map<string, number>;
 type ShopSearchState = {
@@ -1372,25 +1373,36 @@ const subsidizeBusinesses = (world: WorldState, buildingIndex: StepBuildingIndex
     assignedWorkersByBuilding.set(agent.workId, (assignedWorkersByBuilding.get(agent.workId) ?? 0) + 1);
   }
 
+  const getSupportTargetCash = (baseTargetCash: number, assignedWorkers: number) =>
+    Math.max(
+      baseTargetCash,
+      assignedWorkers * HOURLY_WAGE * (WORK_SHIFT_MINUTES / 60) * BUSINESS_SUPPORT_RESERVE_DAYS,
+    );
+  const getHourlyPayroll = (assignedWorkers: number) => Math.max(HOURLY_WAGE, assignedWorkers * HOURLY_WAGE);
   const businessesNeedingSupport = [
     ...getBuildingsByKind(buildingIndex, BuildingKind.Commercial).map((building) => ({
       building,
-      targetCash: COMMERCIAL_STARTING_CASH,
+      assignedWorkers: assignedWorkersByBuilding.get(building.id) ?? 0,
+      baseTargetCash: COMMERCIAL_STARTING_CASH,
       subsidyPerHour: COMMERCIAL_SUBSIDY_PER_HOUR,
     })),
     ...getBuildingsByKind(buildingIndex, BuildingKind.Industrial).map((building) => ({
       building,
-      targetCash: INDUSTRIAL_STARTING_CASH,
+      assignedWorkers: assignedWorkersByBuilding.get(building.id) ?? 0,
+      baseTargetCash: INDUSTRIAL_STARTING_CASH,
       subsidyPerHour: INDUSTRIAL_SUBSIDY_PER_HOUR,
     })),
-  ]
+  ].map(({ assignedWorkers, baseTargetCash, ...business }) => ({
+    ...business,
+    assignedWorkers,
+    targetCash: getSupportTargetCash(baseTargetCash, assignedWorkers),
+    hourlyPayroll: getHourlyPayroll(assignedWorkers),
+  }))
     .filter(({ building, targetCash }) => building.cash < targetCash)
     .sort(
       (left, right) =>
-        left.building.cash /
-          Math.max(HOURLY_WAGE, (assignedWorkersByBuilding.get(left.building.id) ?? 0) * HOURLY_WAGE) -
-          right.building.cash /
-            Math.max(HOURLY_WAGE, (assignedWorkersByBuilding.get(right.building.id) ?? 0) * HOURLY_WAGE) ||
+        right.targetCash - right.building.cash - (left.targetCash - left.building.cash) ||
+        left.building.cash / left.hourlyPayroll - right.building.cash / right.hourlyPayroll ||
         left.building.cash / left.targetCash - right.building.cash / right.targetCash ||
         left.building.cash - right.building.cash ||
         left.building.id.localeCompare(right.building.id),

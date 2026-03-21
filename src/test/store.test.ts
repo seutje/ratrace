@@ -25,7 +25,7 @@ const toSnapshot = (world: WorldState): WorldDynamicSnapshot => ({
   },
   metrics: { ...world.metrics },
   minutesOfDay: world.minutesOfDay,
-  obituary: world.obituary.map((entry) => ({ ...entry })),
+  obituaryCount: world.obituary.length,
   selectedAgent: undefined,
   selectedAgentId: world.selectedAgentId,
   selectedTile: world.selectedTile ? { ...world.selectedTile } : undefined,

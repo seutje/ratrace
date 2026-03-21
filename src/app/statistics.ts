@@ -102,7 +102,7 @@ export const sampleWorldStatistics = (world: WorldState): StatisticsSample => {
 };
 
 export const sampleDynamicStatistics = (snapshot: WorldDynamicSnapshot): StatisticsSample => {
-  const buildingSummary = summarizeBuildings(snapshot.entities.buildings);
+  const buildingSummary = summarizeBuildings(snapshot.entities.buildings ?? []);
   const population = snapshot.frame.posX.length;
 
   return {
@@ -115,7 +115,7 @@ export const sampleDynamicStatistics = (snapshot: WorldDynamicSnapshot): Statist
     housingUsagePercent:
       snapshot.metrics.populationCapacity > 0 ? (population / snapshot.metrics.populationCapacity) * 100 : 0,
     minutesOfDay: snapshot.minutesOfDay,
-    obituaryCount: snapshot.obituary.length,
+    obituaryCount: snapshot.obituaryCount,
     pantryFillPercent: buildingSummary.pantryFillPercent,
     population,
     populationCapacity: snapshot.metrics.populationCapacity,
