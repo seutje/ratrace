@@ -57,7 +57,7 @@ Every tick runs the same ordered simulation pass in `stepWorldInPlace()`:
    - assign or reuse a route
    - move incrementally toward the next route point
    - process arrival effects such as working, sleeping, or shopping
-5. At midnight, run population turnover, household consolidation, and household growth.
+5. At midnight, run population turnover, household consolidation, household growth, and one city-development pass.
 6. Recalculate economy totals such as total wealth and global supply stock.
 
 The worker publishes either full snapshots or compact dynamic snapshots back to the UI, so rendering stays decoupled from the simulation state updates. Dynamic snapshots always carry the transferable per-agent frame data and only include building or traffic payloads when those structures have actually changed; the obituary stays on full snapshots while dynamic updates send only the running death count. The renderer interpolates only across compatible snapshots and resets interpolation on full snapshots, which prevents the follow camera from blending against stale agent indices after structural population changes. The UI also keeps a capped rolling statistics history sampled from those snapshots so the `Statistics` drawer can graph the city's recent trajectory without storing an unbounded trace.
@@ -126,8 +126,9 @@ The economy is intentionally small and mechanical rather than market-sim heavy.
 - Once per hour, commercial buildings restock by purchasing wholesale inventory from industrial buildings.
 - Also once per hour, the treasury can subsidize businesses that are below their target cash level, but only when treasury reserves are above the configured reserve target.
 - Subsidy priority is based on which businesses have the largest staffing-adjusted cash shortfall, with payroll runway used as a tiebreaker, so the most underfunded employers are topped up first.
+- At midnight, agents with large wallet surpluses can collectively fund one development project. That project converts pooled household cash into a permit fee for the treasury, construction demand for existing industry, and startup cash for the new building when applicable.
 
-Economy totals are recomputed from treasury cash, agent wallets, business cash, and stored goods. The result is a closed-loop toy economy where money circulates through wages, retail, wholesale transfers, taxes, subsidies, and death inheritance.
+Economy totals are recomputed from treasury cash, agent wallets, business cash, and stored goods. The result is a closed-loop toy economy where money circulates through wages, retail, wholesale transfers, taxes, subsidies, development spending, and death inheritance.
 
 ### Population turnover and household growth
 
@@ -148,6 +149,7 @@ At midnight the simulation performs long-horizon lifecycle updates.
   - happiness is high enough
   - recent hardship and unpaid work stay below the cutoff
 - New residents inherit blended traits from their parents, receive deterministic names, join the household, and are assigned a job and shift.
+- After those lifecycle updates, the city can add one new road-adjacent residential, commercial, or industrial building if household savings have pooled above the development threshold and the current city mix suggests more capacity is needed. Residential growth is prioritized when housing is tight, while commercial and industrial growth fill out missing services and jobs.
 
 This makes population change an outcome of household prosperity and food security rather than a disconnected spawn timer.
 

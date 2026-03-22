@@ -1,8 +1,17 @@
 import {
   BASE_MOVE_SPEED,
+  CITY_DEVELOPMENT_COMMERCIAL_COST,
+  CITY_DEVELOPMENT_COMMERCIAL_STARTUP_CASH,
+  CITY_DEVELOPMENT_INDUSTRIAL_COST,
+  CITY_DEVELOPMENT_INDUSTRIAL_STARTUP_CASH,
+  CITY_DEVELOPMENT_PERMIT_FEE,
+  CITY_DEVELOPMENT_RESIDENTIAL_COST,
+  CITY_DEVELOPMENT_SUPPLIER_PAYOUT,
+  CITY_DEVELOPMENT_WALLET_RESERVE,
   COMMERCIAL_STARTING_CASH,
   COMMERCIAL_RESTOCK_PER_HOUR,
   COMMERCIAL_SUBSIDY_PER_HOUR,
+  HOME_PANTRY_UNITS_PER_RESIDENT,
   HOUSEHOLD_GROWTH_COST,
   HOUSEHOLD_GROWTH_HAPPINESS_THRESHOLD,
   HOUSEHOLD_GROWTH_WALLET_THRESHOLD,
@@ -27,6 +36,9 @@ import {
   SLEEP_TARGET_ENERGY,
   SLEEP_ENERGY_THRESHOLD,
   SLEEP_START_MINUTE,
+  STARTER_COMMERCIAL_CAPACITY,
+  STARTER_INDUSTRIAL_CAPACITY,
+  STARTER_RESIDENTIAL_CAPACITY,
   STARVATION_CULL_DAYS,
   TREASURY_RESERVE_TARGET,
   WHOLESALE_PRICE_PER_UNIT,
@@ -52,12 +64,13 @@ import {
   WorldState,
   SimulationAdvanceResult,
 } from './types';
-import { createRuntimeAgentName, getLastName } from './naming';
+import { createRuntimeAgentName, createRuntimeBuildingLabel, getLastName } from './naming';
 import {
   clamp,
   formatClock,
   getTile,
   samePoint,
+  setTile,
   tileKey,
   toClockNumber,
 } from './utils';
@@ -377,6 +390,221 @@ const getBuildingsByKind = (buildingIndex: StepBuildingIndex, kind: BuildingKind
   }
 };
 
+type DevelopmentProject = {
+  kind: BuildingKind;
+  totalCost: number;
+  startupCash: number;
+};
+
+const getStarterTargetBuildingCounts = (population: number) => ({
+  residential: Math.max(1, Math.ceil(population / STARTER_RESIDENTIAL_CAPACITY)),
+  commercial: Math.max(1, Math.ceil(population / 14)),
+  industrial: Math.max(1, Math.ceil(population / 12)),
+});
+
+const getBuildableLotNeighbors = ({ x, y }: Point) => [
+  { x: x + 1, y },
+  { x: x - 1, y },
+  { x, y: y + 1 },
+  { x, y: y - 1 },
+];
+
+const isBuildableDevelopmentLot = (world: WorldState, point: Point) => {
+  const tile = getTile(world, point);
+  if (!tile || tile.type !== TileType.Empty || tile.buildingId !== undefined) {
+    return false;
+  }
+
+  return getBuildableLotNeighbors(point).some((neighbor) => getTile(world, neighbor)?.type === TileType.Road);
+};
+
+const getDevelopmentCenterDistance = (world: WorldState, point: Point) =>
+  Math.hypot(point.x - (world.width - 1) / 2, point.y - (world.height - 1) / 2);
+
+const getDevelopmentEdgeBias = (world: WorldState, point: Point) =>
+  Math.max(
+    Math.abs(point.x - (world.width - 1) / 2) / Math.max(1, (world.width - 1) / 2),
+    Math.abs(point.y - (world.height - 1) / 2) / Math.max(1, (world.height - 1) / 2),
+  );
+
+const getNearestDistanceToBuildingKind = (
+  buildingIndex: StepBuildingIndex,
+  point: Point,
+  kind: BuildingKind,
+) => {
+  let nearest = Number.POSITIVE_INFINITY;
+
+  for (const building of getBuildingsByKind(buildingIndex, kind)) {
+    nearest = Math.min(nearest, Math.hypot(building.tile.x - point.x, building.tile.y - point.y));
+  }
+
+  return Number.isFinite(nearest) ? nearest : undefined;
+};
+
+const scoreDevelopmentLot = (
+  world: WorldState,
+  buildingIndex: StepBuildingIndex,
+  kind: BuildingKind,
+  point: Point,
+) => {
+  const centerDistance = getDevelopmentCenterDistance(world, point);
+  const edgeBias = getDevelopmentEdgeBias(world, point);
+  const nearestResidential = getNearestDistanceToBuildingKind(buildingIndex, point, BuildingKind.Residential) ?? 8;
+  const nearestCommercial = getNearestDistanceToBuildingKind(buildingIndex, point, BuildingKind.Commercial) ?? 8;
+  const nearestIndustrial = getNearestDistanceToBuildingKind(buildingIndex, point, BuildingKind.Industrial) ?? 8;
+
+  switch (kind) {
+    case BuildingKind.Residential:
+      return nearestIndustrial * 1.8 - nearestResidential * 0.55 - centerDistance * 0.25 - edgeBias * 2.5;
+    case BuildingKind.Commercial:
+      return -centerDistance * 0.4 - nearestResidential * 0.35 + nearestIndustrial * 0.2 - edgeBias;
+    case BuildingKind.Industrial:
+      return edgeBias * 8 - centerDistance * 0.2 - nearestResidential * 0.55 - nearestCommercial * 0.2;
+  }
+};
+
+const pickDevelopmentLot = (world: WorldState, buildingIndex: StepBuildingIndex, kind: BuildingKind) => {
+  let chosen: Point | undefined;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (let y = 0; y < world.height; y += 1) {
+    for (let x = 0; x < world.width; x += 1) {
+      const point = { x, y };
+      if (!isBuildableDevelopmentLot(world, point)) {
+        continue;
+      }
+
+      const score = scoreDevelopmentLot(world, buildingIndex, kind, point);
+      if (
+        !chosen ||
+        score > bestScore ||
+        (score === bestScore && (point.y < chosen.y || (point.y === chosen.y && point.x < chosen.x)))
+      ) {
+        chosen = point;
+        bestScore = score;
+      }
+    }
+  }
+
+  return chosen;
+};
+
+const getDevelopmentProject = (kind: BuildingKind): DevelopmentProject => {
+  switch (kind) {
+    case BuildingKind.Residential:
+      return {
+        kind,
+        totalCost: CITY_DEVELOPMENT_RESIDENTIAL_COST,
+        startupCash: 0,
+      };
+    case BuildingKind.Commercial:
+      return {
+        kind,
+        totalCost: CITY_DEVELOPMENT_COMMERCIAL_COST,
+        startupCash: CITY_DEVELOPMENT_COMMERCIAL_STARTUP_CASH,
+      };
+    case BuildingKind.Industrial:
+      return {
+        kind,
+        totalCost: CITY_DEVELOPMENT_INDUSTRIAL_COST,
+        startupCash: CITY_DEVELOPMENT_INDUSTRIAL_STARTUP_CASH,
+      };
+  }
+};
+
+const getDevelopmentProjectKinds = (world: WorldState, buildingIndex: StepBuildingIndex) => {
+  const targets = getStarterTargetBuildingCounts(world.entities.agents.length);
+  const housingSlack = world.metrics.populationCapacity - world.entities.agents.length;
+  const pressure = [
+    {
+      kind: BuildingKind.Residential,
+      score:
+        (housingSlack < STARTER_RESIDENTIAL_CAPACITY ? 1000 : housingSlack < STARTER_RESIDENTIAL_CAPACITY * 2 ? 200 : 0) +
+        Math.max(0, targets.residential - buildingIndex.residential.length) * 120,
+    },
+    {
+      kind: BuildingKind.Commercial,
+      score:
+        (buildingIndex.commercial.length === 0 ? 500 : 0) +
+        Math.max(0, targets.commercial - buildingIndex.commercial.length) * 100,
+    },
+    {
+      kind: BuildingKind.Industrial,
+      score:
+        (buildingIndex.industrial.length === 0 ? 500 : 0) +
+        Math.max(0, targets.industrial - buildingIndex.industrial.length) * 100,
+    },
+  ]
+    .filter(({ score }) => score > 0)
+    .sort((left, right) => right.score - left.score || left.kind.localeCompare(right.kind));
+
+  return pressure.map(({ kind }) => kind);
+};
+
+const getAvailableDevelopmentCapital = (world: WorldState) =>
+  world.entities.agents.reduce((sum, agent) => sum + Math.max(0, agent.wallet - CITY_DEVELOPMENT_WALLET_RESERVE), 0);
+
+const collectDevelopmentCapital = (world: WorldState, requiredAmount: number) => {
+  const availableCapital = getAvailableDevelopmentCapital(world);
+  if (availableCapital < requiredAmount) {
+    return 0;
+  }
+
+  let remaining = requiredAmount;
+  const investors = world.entities.agents
+    .filter((agent) => agent.wallet > CITY_DEVELOPMENT_WALLET_RESERVE)
+    .sort(
+      (left, right) =>
+        right.wallet - left.wallet ||
+        right.stats.happiness - left.stats.happiness ||
+        left.id.localeCompare(right.id),
+    );
+
+  for (const investor of investors) {
+    if (remaining <= 0) {
+      break;
+    }
+
+    const contribution = Math.min(remaining, investor.wallet - CITY_DEVELOPMENT_WALLET_RESERVE);
+    if (contribution <= 0) {
+      continue;
+    }
+
+    investor.wallet -= contribution;
+    remaining -= contribution;
+  }
+
+  return requiredAmount - remaining;
+};
+
+const distributeConstructionDemand = (buildingIndex: StepBuildingIndex, amount: number) => {
+  if (amount <= 0) {
+    return 0;
+  }
+
+  const recipients = buildingIndex.industrial
+    .slice()
+    .sort((left, right) => left.cash - right.cash || left.id.localeCompare(right.id));
+  if (recipients.length === 0) {
+    return 0;
+  }
+
+  const baseShare = Math.floor(amount / recipients.length);
+  let remainder = amount % recipients.length;
+  let paid = 0;
+
+  for (const recipient of recipients) {
+    const payment = baseShare + (remainder > 0 ? 1 : 0);
+    recipient.cash += payment;
+    paid += payment;
+    if (remainder > 0) {
+      remainder -= 1;
+    }
+  }
+
+  return paid;
+};
+
 const clearTraffic = (traffic: Record<string, number>) => {
   for (const key in traffic) {
     delete traffic[key];
@@ -559,6 +787,57 @@ const invalidateAgentCommuteState = (agent: Agent) => {
   agent.commuteToWorkRouteMapVersion = 0;
   agent.commuteToHomeRoute = null;
   agent.commuteToHomeRouteMapVersion = 0;
+};
+
+const rebalanceWorkersToNewBuilding = (
+  world: WorldState,
+  buildingIndex: StepBuildingIndex,
+  newBuilding: Building,
+) => {
+  if (newBuilding.kind === BuildingKind.Residential) {
+    return;
+  }
+
+  const currentBuildingById = new Map(world.entities.buildings.map((building) => [building.id, building]));
+  const sameKindWorkers = world.entities.agents.filter(
+    (agent) => currentBuildingById.get(agent.workId)?.kind === newBuilding.kind && agent.workId !== newBuilding.id,
+  );
+  if (sameKindWorkers.length === 0) {
+    return;
+  }
+
+  const workerLoad = new Map<string, number>();
+  for (const agent of sameKindWorkers) {
+    workerLoad.set(agent.workId, (workerLoad.get(agent.workId) ?? 0) + 1);
+  }
+
+  const donorBuilding = getBuildingsByKind(buildingIndex, newBuilding.kind)
+    .filter((building) => building.id !== newBuilding.id)
+    .sort(
+      (left, right) =>
+        (workerLoad.get(right.id) ?? 0) - (workerLoad.get(left.id) ?? 0) ||
+        left.id.localeCompare(right.id),
+    )[0];
+  if (!donorBuilding || (workerLoad.get(donorBuilding.id) ?? 0) <= 1) {
+    return;
+  }
+
+  const reassignedWorker = sameKindWorkers
+    .filter((agent) => agent.workId === donorBuilding.id)
+    .sort(
+      (left, right) =>
+        Math.abs(left.pos.x - newBuilding.tile.x) +
+          Math.abs(left.pos.y - newBuilding.tile.y) -
+          (Math.abs(right.pos.x - newBuilding.tile.x) + Math.abs(right.pos.y - newBuilding.tile.y)) ||
+        left.id.localeCompare(right.id),
+    )[0];
+  if (!reassignedWorker) {
+    return;
+  }
+
+  reassignedWorker.workId = newBuilding.id;
+  reassignedWorker.thought = 'Signed on at a new site.';
+  invalidateAgentCommuteState(reassignedWorker);
 };
 
 const relocateAgentHome = (agent: Agent, targetHome: Building) => {
@@ -1786,6 +2065,80 @@ const transferDeceasedWallet = (world: WorldState, deceasedAgent: Agent, livingA
   deceasedAgent.wallet = 0;
 };
 
+const createDevelopedBuilding = (world: WorldState, point: Point, project: DevelopmentProject): Building => {
+  const id = `build-${world.metrics.mapVersion + 1}-${point.x}-${point.y}`;
+  const residentialPantryCapacity = STARTER_RESIDENTIAL_CAPACITY * HOME_PANTRY_UNITS_PER_RESIDENT;
+
+  return {
+    id,
+    kind: project.kind,
+    tile: point,
+    cash: project.startupCash,
+    stock: 0,
+    capacity:
+      project.kind === BuildingKind.Residential
+        ? STARTER_RESIDENTIAL_CAPACITY
+        : project.kind === BuildingKind.Commercial
+          ? STARTER_COMMERCIAL_CAPACITY
+          : STARTER_INDUSTRIAL_CAPACITY,
+    pantryStock: 0,
+    pantryCapacity: project.kind === BuildingKind.Residential ? residentialPantryCapacity : 0,
+    label: createRuntimeBuildingLabel(world, project.kind, point),
+  };
+};
+
+const runCityDevelopment = (
+  world: WorldState,
+  buildingIndex: StepBuildingIndex,
+  homes: Building[],
+  occupied: Map<string, number>,
+) => {
+  const projectKinds = getDevelopmentProjectKinds(world, buildingIndex);
+  if (projectKinds.length === 0) {
+    return;
+  }
+
+  for (const kind of projectKinds) {
+    const lot = pickDevelopmentLot(world, buildingIndex, kind);
+    if (!lot) {
+      continue;
+    }
+
+    const project = getDevelopmentProject(kind);
+    const invested = collectDevelopmentCapital(world, project.totalCost);
+    if (invested < project.totalCost) {
+      continue;
+    }
+
+    world.economy.treasury += CITY_DEVELOPMENT_PERMIT_FEE;
+    const supplierPayout = distributeConstructionDemand(buildingIndex, CITY_DEVELOPMENT_SUPPLIER_PAYOUT);
+    world.economy.treasury += CITY_DEVELOPMENT_SUPPLIER_PAYOUT - supplierPayout;
+
+    const building = createDevelopedBuilding(world, lot, project);
+    world.entities.buildings.push(building);
+    setTile(world, lot, {
+      ...(getTile(world, lot) ?? { x: lot.x, y: lot.y, type: TileType.Empty }),
+      type:
+        kind === BuildingKind.Residential
+          ? TileType.Residential
+          : kind === BuildingKind.Commercial
+            ? TileType.Commercial
+            : TileType.Industrial,
+      buildingId: building.id,
+    });
+    world.metrics.mapVersion += 1;
+
+    if (kind === BuildingKind.Residential) {
+      homes.push(building);
+      occupied.set(building.id, 0);
+    } else {
+      rebalanceWorkersToNewBuilding(world, buildingIndex, building);
+    }
+
+    return;
+  }
+};
+
 const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingIndex) => {
   if (world.minutesOfDay !== 0) {
     return;
@@ -1921,6 +2274,9 @@ const runPopulationTurnover = (world: WorldState, buildingIndex: StepBuildingInd
     }
   }
 
+  runCityDevelopment(world, buildingIndex, homes, occupied);
+
+  capacity = homes.reduce((sum, home) => sum + home.capacity, 0);
   world.metrics.populationCapacity = capacity;
 };
 

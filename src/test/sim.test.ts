@@ -3,6 +3,10 @@ import { COMMERCIAL_SHIFT_PROFILES, COMMERCIAL_WORKER_SHARE, INDUSTRIAL_SHIFT_PR
 import { advanceWorld, stepWorld } from '../sim/stepWorld';
 import { paintWorldTile } from '../sim/worldMutations';
 import {
+  CITY_DEVELOPMENT_PERMIT_FEE,
+  CITY_DEVELOPMENT_RESIDENTIAL_COST,
+  CITY_DEVELOPMENT_SUPPLIER_PAYOUT,
+  CITY_DEVELOPMENT_WALLET_RESERVE,
   COMMERCIAL_STARTING_CASH,
   COMMERCIAL_SUBSIDY_PER_HOUR,
   HOME_PANTRY_UNITS_PER_RESIDENT,
@@ -2361,6 +2365,70 @@ describe('traffic and lifecycle', () => {
     expect(next.entities.agents).toHaveLength(2);
     expect(next.entities.agents.every((agent) => agent.wallet === HOUSEHOLD_GROWTH_COST)).toBe(true);
     expect(next.economy.treasury).toBe(world.economy.treasury);
+  });
+
+  it('turns pooled household cash into new housing and construction demand', () => {
+    const world = createBlankWorld(4, 3);
+    setTile(world, { x: 1, y: 0 }, { x: 1, y: 0, type: TileType.Road });
+    setTile(world, { x: 1, y: 1 }, { x: 1, y: 1, type: TileType.Road });
+    setTile(world, { x: 1, y: 2 }, { x: 1, y: 2, type: TileType.Road });
+    setTile(world, { x: 0, y: 1 }, { x: 0, y: 1, type: TileType.Residential, buildingId: 'home' });
+    setTile(world, { x: 2, y: 1 }, { x: 2, y: 1, type: TileType.Industrial, buildingId: 'work' });
+    world.entities.buildings.push(
+      {
+        id: 'home',
+        kind: BuildingKind.Residential,
+        tile: { x: 0, y: 1 },
+        cash: 0,
+        stock: 0,
+        capacity: 2,
+        pantryStock: 4,
+        pantryCapacity: 4,
+        label: 'home',
+      },
+      {
+        id: 'work',
+        kind: BuildingKind.Industrial,
+        tile: { x: 2, y: 1 },
+        cash: 0,
+        stock: 0,
+        capacity: 4,
+        pantryStock: 0,
+        pantryCapacity: 0,
+        label: 'work',
+      },
+    );
+    world.metrics.populationCapacity = 2;
+    world.entities.agents = [
+      makeTestAgent({
+        id: 'agent-1',
+        sex: AgentSex.Female,
+        homeId: 'home',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 1 }),
+        wallet: CITY_DEVELOPMENT_WALLET_RESERVE + CITY_DEVELOPMENT_RESIDENTIAL_COST / 2,
+        stats: { hunger: 10, energy: 90, happiness: 90 },
+      }),
+      makeTestAgent({
+        id: 'agent-2',
+        sex: AgentSex.Male,
+        homeId: 'home',
+        workId: 'work',
+        pos: tileCenter({ x: 0, y: 1 }),
+        wallet: CITY_DEVELOPMENT_WALLET_RESERVE + CITY_DEVELOPMENT_RESIDENTIAL_COST / 2,
+        stats: { hunger: 10, energy: 90, happiness: 90 },
+      }),
+    ];
+    world.minutesOfDay = 23 * 60 + 59;
+    const initialTreasury = world.economy.treasury;
+
+    const next = stepWorld(world);
+
+    expect(next.entities.buildings.filter((building) => building.kind === BuildingKind.Residential)).toHaveLength(2);
+    expect(next.metrics.populationCapacity).toBe(6);
+    expect(next.entities.buildings.find((building) => building.id === 'work')?.cash).toBe(CITY_DEVELOPMENT_SUPPLIER_PAYOUT);
+    expect(next.economy.treasury).toBe(initialTreasury + CITY_DEVELOPMENT_PERMIT_FEE);
+    expect(next.entities.agents.reduce((sum, agent) => sum + agent.wallet, 0)).toBe(CITY_DEVELOPMENT_WALLET_RESERVE * 2);
   });
 
   it('remains stable over a longer deterministic soak', () => {
